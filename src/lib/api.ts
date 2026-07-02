@@ -181,6 +181,16 @@ export function submitWorkspaceTaskOutputs(id: string, outputAssetIds: string[])
   });
 }
 
+export function updateWorkspaceTaskAssignment(
+  id: string,
+  input: { assignedToId?: string; dueAt?: string },
+) {
+  return request<GenerationTask>(`/tasks/${id}/assignment`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
 export function reviewWorkspaceTask(id: string, approved: boolean, comment: string) {
   return request<GenerationTask>(`/tasks/${id}/review`, {
     method: "POST",

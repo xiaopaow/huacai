@@ -19,6 +19,7 @@ import {
   recordActivity,
   reviewWorkspaceTask,
   submitWorkspaceTaskOutputs,
+  updateWorkspaceTaskAssignment,
   updateWorkspaceProduct,
   uploadTaskImages,
   type WorkspaceNotification,
@@ -1024,10 +1025,25 @@ function Tasks({
   const [selected, setSelected] = useState<GenerationTask | null>(null);
   const [outputFiles, setOutputFiles] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [team, setTeam] = useState<Array<Pick<EmployeeAccount, "id" | "name" | "department" | "role">>>([]);
+  const [assignmentId, setAssignmentId] = useState("");
+  const [assignmentDueDate, setAssignmentDueDate] = useState("");
+  const [savingAssignment, setSavingAssignment] = useState(false);
   const filtered = tasks.filter((task) => {
     const matchesQuery = `${task.id}${task.sku}${task.productName}`.toLowerCase().includes(query.toLowerCase());
     return matchesQuery && (status === "全部" || task.status === status);
   });
+
+  useEffect(() => {
+    if (currentUser.role !== "管理员" && currentUser.role !== "运营") return;
+    getTeamDirectory().then(setTeam).catch(() => undefined);
+  }, [currentUser.role]);
+
+  const openTask = (task: GenerationTask) => {
+    setSelected(task);
+    setAssignmentId(task.assignedToId ?? "");
+    setAssignmentDueDate(task.dueAt ? task.dueAt.slice(0, 10) : "");
+  };
 
   const closeSelected = () => {
     if (submitting) return;
@@ -1055,6 +1071,24 @@ function Tasks({
     }
   };
 
+  const saveAssignment = async () => {
+    if (!selected || savingAssignment) return;
+    setSavingAssignment(true);
+    try {
+      const saved = await updateWorkspaceTaskAssignment(selected.id, {
+        assignedToId: assignmentId || undefined,
+        dueAt: assignmentDueDate ? new Date(`${assignmentDueDate}T18:00:00`).toISOString() : undefined,
+      });
+      onTaskUpdated(saved);
+      setSelected(saved);
+      notify("负责人和截止时间已更新");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "任务安排更新失败");
+    } finally {
+      setSavingAssignment(false);
+    }
+  };
+
   return (
     <div className="panel">
       <div className="toolbar">
@@ -1063,7 +1097,7 @@ function Tasks({
           <option>全部</option><option>草稿</option><option>待生成</option><option>生成中</option><option>待审核</option><option>已驳回</option><option>已通过</option>
         </select>
       </div>
-      {filtered.length ? <TaskTable tasks={filtered} onOpen={setSelected} /> : <EmptyState title="没有匹配的任务" description="请调整搜索词或状态筛选。" />}
+      {filtered.length ? <TaskTable tasks={filtered} onOpen={openTask} /> : <EmptyState title="没有匹配的任务" description="请调整搜索词或状态筛选。" />}
       {selected && (
         <div className="modal-backdrop" onMouseDown={closeSelected}>
           <section className="modal task-detail" onMouseDown={(event) => event.stopPropagation()}>
@@ -1081,6 +1115,23 @@ function Tasks({
               <div><dt>成品数量</dt><dd>{selected.outputCount ?? 0} 张</dd></div>
               <div><dt>最后更新</dt><dd>{selected.updatedAt}</dd></div>
             </dl>
+            {(currentUser.role === "管理员" || currentUser.role === "运营") && selected.status !== "已通过" && (
+              <div className="task-assignment-editor">
+                <div><b>任务调度</b><p>更换负责人或调整交付日期，新负责人会收到站内通知。</p></div>
+                <label>负责人
+                  <select value={assignmentId} onChange={(event) => setAssignmentId(event.target.value)}>
+                    <option value="">待分配</option>
+                    {team.filter((member) => member.role === "设计" || member.role === "管理员").map((member) => (
+                      <option value={member.id} key={member.id}>{member.name} · {member.department}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>截止日期
+                  <input type="date" min={new Date().toISOString().slice(0, 10)} value={assignmentDueDate} onChange={(event) => setAssignmentDueDate(event.target.value)} />
+                </label>
+                <button className="secondary-button" disabled={savingAssignment} onClick={saveAssignment}>{savingAssignment ? "保存中…" : "更新安排"}</button>
+              </div>
+            )}
             {selected.reviewComment && (
               <div className={`task-review-result ${selected.status === "已驳回" ? "rejected" : ""}`}>
                 <b>{selected.status === "已驳回" ? "需要修改" : "审核意见"}</b>

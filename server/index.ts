@@ -564,6 +564,54 @@ app.patch("/api/tasks/:id/status", requireRoles("管理员", "运营", "设计",
   response.json(task);
 });
 
+app.patch("/api/tasks/:id/assignment", requireRoles("管理员", "运营"), async (request: AuthenticatedRequest, response) => {
+  const task = db.data.tasks.find((item) => item.id === String(request.params.id));
+  if (!task) {
+    response.status(404).json({ error: "任务不存在" });
+    return;
+  }
+  if (task.status === "已通过") {
+    response.status(409).json({ error: "已通过的任务不能改派" });
+    return;
+  }
+  const input = request.body as { assignedToId?: string | null; dueAt?: string | null };
+  const assignedToId = input.assignedToId?.trim() || undefined;
+  const assignee = assignedToId
+    ? db.data.employees.find((employee) =>
+      employee.id === assignedToId
+      && employee.active
+      && (employee.role === "设计" || employee.role === "管理员"),
+    )
+    : undefined;
+  if (assignedToId && !assignee) {
+    response.status(400).json({ error: "负责人不存在、已停用或不是设计人员" });
+    return;
+  }
+  const dueAt = input.dueAt?.trim() || undefined;
+  if (dueAt && Number.isNaN(new Date(dueAt).getTime())) {
+    response.status(400).json({ error: "截止时间格式无效" });
+    return;
+  }
+  const assigneeChanged = task.assignedToId !== assignee?.id;
+  const dueDateChanged = task.dueAt !== dueAt;
+  task.assignedToId = assignee?.id;
+  task.assignedToName = assignee?.name ?? "待分配";
+  task.owner = task.assignedToName;
+  task.dueAt = dueAt;
+  task.updatedAt = "刚刚";
+  if (assignee && assignee.id !== request.employee!.id && (assigneeChanged || dueDateChanged)) {
+    createNotification(
+      assignee.id,
+      "TASK_ASSIGNED",
+      assigneeChanged ? `任务改派：${task.productName}` : `任务期限更新：${task.productName}`,
+      `${request.employee!.name} 更新了任务安排${dueAt ? `，截止 ${new Date(dueAt).toLocaleDateString("zh-CN")}` : "，未设置截止日期"}`,
+      task.id,
+    );
+  }
+  await db.write();
+  response.json(task);
+});
+
 app.post("/api/tasks/:id/submit", requireRoles("管理员", "设计"), async (request: AuthenticatedRequest, response) => {
   const task = db.data.tasks.find((item) => item.id === String(request.params.id));
   const outputAssetIds = [...new Set(
