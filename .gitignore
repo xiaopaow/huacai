@@ -1,0 +1,12 @@
+node_modules
+dist
+server-dist
+.env
+.env.*
+!.env.example
+*.local
+*.tsbuildinfo
+data/
+output/
+*.zip
+.DS_Store

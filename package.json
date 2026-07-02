@@ -1,0 +1,36 @@
+{
+  "name": "huacai-amazon-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n API,WEB -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:web": "vite --host 0.0.0.0",
+    "dev:server": "tsx watch server/index.ts",
+    "build": "tsc -p tsconfig.server.json --noEmit && tsc -b && vite build && tsc -p tsconfig.server.build.json",
+    "start": "node server-dist/index.js",
+    "start:server": "tsx server/index.ts",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "lowdb": "^7.0.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "undici": "^7.28.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "concurrently": "^9.2.3",
+    "tsx": "^4.22.4",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.0"
+  }
+}
