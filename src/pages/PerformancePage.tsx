@@ -5,10 +5,13 @@ import type { ActivityEvent, EmployeeMetric } from "../types/domain";
 const activityLabels: Record<string, string> = {
   SKU_CREATED: "新建 SKU",
   IMAGE_UPLOADED: "上传商品图",
+  IMAGE_GENERATED: "AI 生图成功",
   TASK_CREATED: "创建生成任务",
   REVIEW_APPROVED: "审核通过",
   REVIEW_REJECTED: "审核驳回",
   LISTING_DRAFTED: "新建 Listing",
+  LISTING_GENERATED: "AI 生成 Listing",
+  LISTING_SAVED: "保存 Listing",
   LISTING_VALIDATED: "校验 Listing",
   LISTING_PUBLISHED: "发布 Listing",
 };
@@ -31,10 +34,10 @@ export default function PerformancePage() {
 
   const totals = useMemo(() => ({
     sku: metrics.reduce((sum, item) => sum + item.skuCreated, 0),
-    images: metrics.reduce((sum, item) => sum + item.imagesUploaded, 0),
+    images: metrics.reduce((sum, item) => sum + item.imagesGenerated, 0),
     tasks: metrics.reduce((sum, item) => sum + item.tasksCreated, 0),
     reviews: metrics.reduce((sum, item) => sum + item.reviewsCompleted, 0),
-    listings: metrics.reduce((sum, item) => sum + item.listingsPublished, 0),
+    listings: metrics.reduce((sum, item) => sum + item.listingsGenerated, 0),
   }), [metrics]);
 
   const employeeName = (id: string) => metrics.find((item) => item.id === id)?.name ?? id;
@@ -53,10 +56,10 @@ export default function PerformancePage() {
       <div className="metric-grid">
         {[
           ["新建 SKU", totals.sku, "◇"],
-          ["上传图片", totals.images, "▧"],
+          ["AI 生图", totals.images, "▧"],
           ["生成任务", totals.tasks, "✦"],
           ["完成审核", totals.reviews, "✓"],
-          ["发布 Listing", totals.listings, "↗"],
+          ["AI Listing", totals.listings, "↗"],
         ].map(([label, value, icon]) => (
           <article className="panel metric-card" key={label}><span>{icon}</span><div><small>{label}</small><strong>{loading ? "—" : value}</strong></div></article>
         ))}
@@ -66,16 +69,16 @@ export default function PerformancePage() {
         <div className="panel employee-table">
           <div className="panel-head"><div><span className="eyebrow">EMPLOYEE OUTPUT</span><h3>员工工作量明细</h3></div></div>
           <div className="employee-row employee-header">
-            <span>员工</span><span>SKU</span><span>图片</span><span>任务</span><span>审核</span><span>Listing</span><span>最后操作</span>
+            <span>员工</span><span>SKU</span><span>AI 生图</span><span>任务</span><span>审核</span><span>Listing 生成/发布</span><span>最后操作</span>
           </div>
           {metrics.map((employee) => (
             <div className="employee-row" key={employee.id}>
               <span className="employee-cell"><i>{employee.name[0]}</i><span><b>{employee.name}</b><small>{employee.department} · {employee.role}</small></span></span>
               <strong>{employee.skuCreated}</strong>
-              <strong>{employee.imagesUploaded}</strong>
+              <strong>{employee.imagesGenerated}</strong>
               <strong>{employee.tasksCreated}</strong>
               <strong>{employee.reviewsCompleted}</strong>
-              <strong>{employee.listingsDrafted}/{employee.listingsPublished}</strong>
+              <strong>{employee.listingsGenerated}/{employee.listingsPublished}</strong>
               <small>{employee.lastActiveAt ? new Date(employee.lastActiveAt).toLocaleString("zh-CN") : "暂无"}</small>
             </div>
           ))}

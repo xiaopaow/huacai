@@ -6,6 +6,8 @@ export type ActivityType =
   | "REVIEW_APPROVED"
   | "REVIEW_REJECTED"
   | "LISTING_DRAFTED"
+  | "LISTING_GENERATED"
+  | "LISTING_SAVED"
   | "LISTING_VALIDATED"
   | "LISTING_PUBLISHED";
 
@@ -35,6 +37,16 @@ export interface NotificationRecord {
   title: string;
   message: string;
   entityId: string;
+  entityType?: "task";
+  targetPage?: "tasks" | "reviews";
+  metadata?: {
+    sku?: string;
+    productName?: string;
+    taskType?: WorkspaceTask["type"];
+    version?: number;
+    dueAt?: string;
+    action?: "open_task" | "review_task" | "revise_task" | "view_result";
+  };
   createdAt: string;
   readAt?: string;
 }
@@ -68,15 +80,69 @@ export interface AmazonListing {
   quantity: number;
   status: ListingStatus;
   ownerId: string;
+  ownerName?: string;
+  createdAt?: string;
+  lastEditedById?: string;
+  lastEditedByName?: string;
+  latestGenerationId?: string;
   asin?: string;
+  competitorUrl?: string;
+  competitorAsin?: string;
+  aiGeneratedAt?: string;
+  templateFileName?: string;
+  templateValues?: Record<string, string>;
   amazonSubmissionId?: string;
   issues: string[];
   updatedAt: string;
 }
 
+export interface ListingGenerationRecord {
+  id: string;
+  listingId: string;
+  version: number;
+  sku: string;
+  marketplaceName: string;
+  productType: string;
+  brand: string;
+  generatedById: string;
+  generatedByName: string;
+  competitorAsin: string;
+  competitorUrl: string;
+  competitorTitle?: string;
+  model: string;
+  generationMode: "competitor_first";
+  title: string;
+  bulletPoints: string[];
+  description: string;
+  searchTerms: string;
+  compliance: {
+    compliant: boolean;
+    issues: Array<{
+      code: string;
+      field: string;
+      severity: "error" | "warning";
+      message: string;
+      index?: number;
+    }>;
+  };
+  generatedAt: string;
+  adoptedAt?: string;
+  adoptedById?: string;
+  adoptedByName?: string;
+  savedCopy?: {
+    title: string;
+    bulletPoints: string[];
+    description: string;
+    searchTerms: string;
+  };
+}
+
 export interface GeneratedAsset {
   id: string;
   ownerId: string;
+  ownerName?: string;
+  generationJobId?: string;
+  generationLabel?: string;
   prompt: string;
   ratio: "1:1" | "16:9" | "3:4";
   quality: "low" | "medium" | "high";
@@ -96,6 +162,7 @@ export interface UploadedAssetRecord {
   size: number;
   taskId: string;
   productId: string;
+  purpose?: "input" | "output" | "reference";
   createdAt: string;
 }
 
@@ -149,20 +216,22 @@ export interface WorkspaceTask {
 }
 
 export interface ImageGenerationJob {
-  id: string;
-  ownerId: string;
-  status: "queued" | "running" | "succeeded" | "failed";
-  progress: number;
-  prompt: string;
-  ratio: "1:1" | "16:9" | "3:4";
-  quality: "low" | "medium" | "high";
-  referenceAssetIds: string[];
-  templateId?: string;
-  templateTitle?: string;
-  resultAssetId?: string;
-  errorCode?: string;
-  errorMessage?: string;
-  attempts: number;
+    id: string;
+    ownerId: string;
+    status: "queued" | "running" | "succeeded" | "failed";
+    progress: number;
+    prompt: string;
+    ratio: "1:1" | "16:9" | "3:4";
+    quality: "low" | "medium" | "high";
+    count?: number;
+    referenceAssetIds: string[];
+    templateId?: string;
+    templateTitle?: string;
+    resultAssetId?: string;
+    resultAssetIds?: string[];
+    errorCode?: string;
+    errorMessage?: string;
+    attempts: number;
   createdAt: string;
   updatedAt: string;
     startedAt?: string;
@@ -175,6 +244,7 @@ export interface DatabaseSchema {
   sessions: AuthSession[];
   activities: ActivityEvent[];
   listings: AmazonListing[];
+  listingGenerations: ListingGenerationRecord[];
   generatedAssets: GeneratedAsset[];
   uploadedAssets: UploadedAssetRecord[];
   products: WorkspaceProduct[];

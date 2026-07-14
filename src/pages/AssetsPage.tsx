@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { inspirationTemplates, type InspirationTemplate } from "../data/templates";
 import {
-  deleteAsset,
+  ApiError,
   deleteAssets,
   createImageJob,
   deleteImageJob,
   getAiStatus,
-  getAssetObjectUrl,
   getGeneratedImages,
   getImageJobs,
   retryImageJob,
@@ -19,30 +18,41 @@ import type { EmployeeAccount } from "../types/domain";
 type Filter = "全部" | string;
 type Ratio = "1:1" | "16:9" | "3:4";
 type Quality = "low" | "medium" | "high";
+type GenerateCount = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+const generateCountOptions: GenerateCount[] = [1, 2, 3, 4, 5, 6, 7];
 
-function loadStudioDraft(employeeId: string): { prompt: string; ratio: Ratio; quality: Quality } {
+function loadStudioDraft(employeeId: string): { prompt: string; ratio: Ratio; quality: Quality; count: GenerateCount } {
   try {
     const saved = JSON.parse(localStorage.getItem(`huacai-studio-draft:${employeeId}`) ?? "{}") as {
       prompt?: string;
       ratio?: Ratio;
       quality?: Quality;
+      count?: GenerateCount;
     };
     return {
       prompt: saved.prompt ?? "",
       ratio: ["1:1", "16:9", "3:4"].includes(saved.ratio ?? "") ? saved.ratio! : "1:1",
       quality: ["low", "medium", "high"].includes(saved.quality ?? "") ? saved.quality! : "medium",
+      count: generateCountOptions.includes(saved.count ?? 0 as GenerateCount) ? saved.count! : 3,
     };
   } catch {
-    return { prompt: "", ratio: "1:1", quality: "medium" };
+    return { prompt: "", ratio: "1:1", quality: "medium", count: 3 };
   }
 }
 
-export default function AssetsPage({ notify, currentUser }: { notify: (message: string) => void; currentUser: EmployeeAccount }) {
+export default function AssetsPage({
+  notify,
+  currentUser,
+  onOpenHistory,
+}: {
+  notify: (message: string) => void;
+  currentUser: EmployeeAccount;
+  onOpenHistory?: () => void;
+}) {
   const [initialDraft] = useState(() => loadStudioDraft(currentUser.id));
   const studioRef = useRef<HTMLElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const persistedUrlsRef = useRef<string[]>([]);
   const hydratedJobIdsRef = useRef<Set<string>>(new Set());
   const knownAssetIdsRef = useRef<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -54,6 +64,7 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
   const [prompt, setPrompt] = useState(initialDraft.prompt);
   const [ratio, setRatio] = useState<Ratio>(initialDraft.ratio);
   const [quality, setQuality] = useState<Quality>(initialDraft.quality);
+  const [count, setCount] = useState<GenerateCount>(initialDraft.count);
   const [referenceFiles, setReferenceFiles] = useState<File[]>([]);
   const [referencePreviews, setReferencePreviews] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -61,8 +72,6 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [imageJobs, setImageJobs] = useState<ImageGenerationJob[]>([]);
   const [aiStatus, setAiStatus] = useState<Awaited<ReturnType<typeof getAiStatus>> | null>(null);
-  const [deleteCandidate, setDeleteCandidate] = useState<GeneratedImage | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [favorites, setFavorites] = useState<Set<string>>(() => {
     try {
@@ -83,18 +92,9 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
     const loadResults = async () => {
       try {
         const saved = await getGeneratedImages();
-        const withPreviews = await Promise.all(saved.map(async (image) => {
-          try {
-            const dataUrl = await getAssetObjectUrl(image.id);
-            persistedUrlsRef.current.push(dataUrl);
-            return { ...image, dataUrl };
-          } catch {
-            return image;
-          }
-        }));
         if (!cancelled) {
-          knownAssetIdsRef.current = new Set(withPreviews.map((image) => image.id));
-          setResults(withPreviews);
+          knownAssetIdsRef.current = new Set(saved.map((image) => image.id));
+          setResults(saved);
         }
       } catch {
         // The studio remains usable even if an older asset cannot be loaded.
@@ -105,8 +105,6 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
     void loadResults();
     return () => {
       cancelled = true;
-      persistedUrlsRef.current.forEach(URL.revokeObjectURL);
-      persistedUrlsRef.current = [];
     };
   }, []);
 
@@ -117,9 +115,9 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
   useEffect(() => {
     localStorage.setItem(
       `huacai-studio-draft:${currentUser.id}`,
-      JSON.stringify({ prompt, ratio, quality }),
+      JSON.stringify({ prompt, ratio, quality, count }),
     );
-  }, [currentUser.id, prompt, ratio, quality]);
+  }, [currentUser.id, prompt, ratio, quality, count]);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,24 +136,25 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
           } : current);
         }
         for (const job of jobs) {
+          const jobResults = job.results?.length ? job.results : job.result ? [job.result] : [];
           if (
             job.status !== "succeeded"
-            || !job.result
+            || !jobResults.length
             || hydratedJobIdsRef.current.has(job.id)
-            || knownAssetIdsRef.current.has(job.result.id)
+            || jobResults.every((result) => knownAssetIdsRef.current.has(result.id))
           ) continue;
           hydratedJobIdsRef.current.add(job.id);
           try {
-            const dataUrl = await getAssetObjectUrl(job.result.id);
+            const hydrated = jobResults.filter((result) => !knownAssetIdsRef.current.has(result.id));
             if (cancelled) {
-              URL.revokeObjectURL(dataUrl);
               return;
             }
-            persistedUrlsRef.current.push(dataUrl);
-            knownAssetIdsRef.current.add(job.result.id);
-            setResults((current) => [{ ...job.result!, dataUrl }, ...current].slice(0, 24));
+            hydrated.forEach((result) => {
+              knownAssetIdsRef.current.add(result.id);
+            });
+            setResults((current) => [...hydrated, ...current].slice(0, 24));
             setAiStatus((current) => current ? { ...current, lastFailure: null } : current);
-            notify("后台图片任务已完成，作品已进入素材库");
+            notify(`后台图片任务已完成，${hydrated.length} 张作品已进入素材库`);
           } catch {
             hydratedJobIdsRef.current.delete(job.id);
           }
@@ -205,6 +204,7 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
       promptRef.current?.focus({ preventScroll: true });
       promptRef.current?.setSelectionRange(template.prompt.length, template.prompt.length);
     }, 40);
+    notify(`已载入「${template.title}」，检查提示词和商品图后即可一键生成`);
   };
 
   const addReferenceFiles = (files: FileList | null) => {
@@ -225,22 +225,48 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
     let uploadedAssetIds: string[] = [];
     let jobAccepted = false;
     try {
+      const normalizedPrompt = prompt.trim().replace(/\s+/g, " ").toLowerCase();
+      const localDuplicate = imageJobs.find((job) => (
+        job.prompt.trim().replace(/\s+/g, " ").toLowerCase() === normalizedPrompt
+        && job.ratio === ratio
+        && job.quality === quality
+        && (job.count ?? 1) === count
+      ));
+      let allowDuplicate = false;
+      if (localDuplicate) {
+        const active = localDuplicate.status === "queued" || localDuplicate.status === "running";
+        allowDuplicate = window.confirm(active
+          ? "相同提示词和参数的任务正在生成。再次提交会重复扣费并生成重复图片，确定仍要继续吗？"
+          : `相同提示词和参数的任务已经${localDuplicate.status === "succeeded" ? "完成" : "提交过"}。确定要再次生成吗？`);
+        if (!allowDuplicate) return;
+      }
       const uploaded = referenceFiles.length
-        ? await uploadTaskImages(`studio-${Date.now()}`, "", referenceFiles)
+        ? await uploadTaskImages(`studio-${Date.now()}`, "", referenceFiles, "reference")
         : [];
       uploadedAssetIds = uploaded.map((asset) => asset.id);
-      const job = await createImageJob({
+      const requestInput = {
         prompt: prompt.trim(),
         ratio,
         quality,
+        count,
         referenceAssetIds: uploadedAssetIds,
         templateId: appliedTemplate?.id,
         templateTitle: appliedTemplate?.title,
-      });
+        allowDuplicate,
+      };
+      let job;
+      try {
+        job = await createImageJob(requestInput);
+      } catch (reason) {
+        if (!(reason instanceof ApiError) || reason.code !== "duplicate_image_job") throw reason;
+        const confirmed = window.confirm(`${reason.message}\n\n继续会再次调用 AI 并产生费用，确定仍要生成吗？`);
+        if (!confirmed) return;
+        job = await createImageJob({ ...requestInput, allowDuplicate: true });
+      }
       jobAccepted = true;
       setImageJobs((current) => [job, ...current.filter((item) => item.id !== job.id)]);
       setReferenceFiles([]);
-      notify("生成任务已提交到后台，可以继续浏览或离开页面");
+      notify(`生成任务已提交到后台，预计生成 ${count} 张图，可以继续浏览或离开页面`);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "图片生成失败，请稍后重试";
       setError(message);
@@ -274,6 +300,7 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
     setPrompt(job.prompt);
     setRatio(job.ratio as Ratio);
     setQuality(job.quality as Quality);
+    setCount(generateCountOptions.includes(job.count ?? 0 as GenerateCount) ? job.count as GenerateCount : 3);
     setError("");
     window.setTimeout(() => {
       studioRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -289,22 +316,6 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
       setImageJobs((current) => current.filter((item) => item.id !== job.id));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "任务记录移除失败");
-    }
-  };
-
-  const removeGeneratedImage = async () => {
-    if (!deleteCandidate || deleting) return;
-    setDeleting(true);
-    try {
-      await deleteAsset(deleteCandidate.id);
-      if (deleteCandidate.dataUrl?.startsWith("blob:")) URL.revokeObjectURL(deleteCandidate.dataUrl);
-      setResults((current) => current.filter((image) => image.id !== deleteCandidate.id));
-      setDeleteCandidate(null);
-      notify("作品已从素材库删除");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "作品删除失败");
-    } finally {
-      setDeleting(false);
     }
   };
 
@@ -327,12 +338,13 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
             {appliedTemplate && (
               <div className="applied-template-chip">
                 <img src={appliedTemplate.imageUrl} alt="" />
-                <span><small>正在参考</small><b>{appliedTemplate.title}</b></span>
+                <span><small>已应用提示词模板（非商品参考图）</small><b>{appliedTemplate.title}</b></span>
                 <button type="button" onClick={() => setAppliedTemplate(null)} aria-label="移除模板">×</button>
               </div>
             )}
             <textarea
               ref={promptRef}
+              aria-label="图片生成提示词"
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={(event) => {
@@ -380,12 +392,12 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
         <div className="ai-controls">
           <label><span>画面比例</span><select value={ratio} onChange={(event) => setRatio(event.target.value as Ratio)}><option value="1:1">1:1 方图</option><option value="16:9">16:9 横图</option><option value="3:4">3:4 竖图</option></select></label>
           <label><span>生成质量</span><select value={quality} onChange={(event) => setQuality(event.target.value as Quality)}><option value="low">快速草图</option><option value="medium">标准出图</option><option value="high">高清成品</option></select></label>
-          <div className="ai-count"><span>生成数量</span><b>1 张</b></div>
+          <label><span>生成数量</span><select value={count} onChange={(event) => setCount(Number(event.target.value) as GenerateCount)}>{generateCountOptions.map((option) => <option value={option} key={option}>{option} 张</option>)}</select></label>
           <button className="ai-generate-button" type="button" disabled={generating} onClick={createImage}>
-            {generating ? <><i className="spinner" />正在提交后台任务</> : <>一键生成图片 <span>↗</span></>}
+            {generating ? <><i className="spinner" />正在提交后台任务</> : <>一键生成 {count} 张图 <span>↗</span></>}
           </button>
         </div>
-        {error && <div className="ai-error">! {error}</div>}
+        {error && <div className="ai-error" role="alert">! {error}</div>}
       </section>
 
       {imageJobs.length > 0 && (
@@ -398,13 +410,27 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
             {imageJobs.slice(0, 6).map((job) => (
               <article key={job.id}>
                 <span className={`ai-job-state ${job.status}`}>
-                  {job.status === "queued" && job.nextRetryAt ? "自动重试" : job.status === "queued" ? "排队中" : job.status === "running" ? "生成中" : job.status === "succeeded" ? "已完成" : "失败"}
+                  {job.status === "queued" && job.nextRetryAt
+                    ? "自动重试"
+                    : job.status === "queued"
+                      ? "排队中"
+                      : job.status === "running"
+                        ? `生成中 ${job.resultAssetIds?.length ?? (job.resultAssetId ? 1 : 0)}/${job.count ?? 1}`
+                        : job.status === "succeeded"
+                          ? "已完成"
+                          : "失败"}
                 </span>
                 <div>
                   <b>{job.templateTitle || `${job.ratio} 商品图`}</b>
                   <small>{job.prompt}</small>
                   {(job.status === "queued" || job.status === "running") && <div className="ai-job-progress"><i style={{ width: `${job.progress}%` }} /></div>}
                   {job.errorMessage && <em>{job.errorMessage}</em>}
+                  <small>
+                    预计输出 {job.count ?? 1} 张
+                    {(job.resultAssetIds?.length || job.resultAssetId)
+                      ? ` · 已保存 ${job.resultAssetIds?.length ?? 1} 张`
+                      : ""}
+                  </small>
                 </div>
                 <time>{new Date(job.updatedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time>
                 {(job.status === "failed" || job.status === "succeeded") && (
@@ -420,27 +446,16 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
         </section>
       )}
 
-      {(loadingResults || results.length > 0) && (
-        <section className="ai-results">
-          <div className="template-results-head"><div><i />团队生成作品</div><span>结果永久保存在素材库，刷新页面也不会丢失</span></div>
-          {loadingResults ? <div className="ai-results-loading"><i className="spinner" />正在读取历史作品</div> : (
-            <div className="ai-result-grid">
-              {results.map((image) => (
-              <article className="ai-result-card" key={image.id}>
-                {image.dataUrl ? <img src={image.dataUrl} alt={image.templateTitle || "AI 生成结果"} /> : <div className="ai-result-missing">图片文件暂不可用</div>}
-                <div>
-                  <span><b>{image.templateTitle || `${image.ratio} 商品图`}</b><small>{image.ownerName} · {new Date(image.createdAt).toLocaleDateString("zh-CN")} · {image.size}</small></span>
-                  <div className="ai-result-actions">
-                    {image.dataUrl && <a href={image.dataUrl} download={`huacai-${image.id}`}>下载 ↓</a>}
-                    {(currentUser.role === "管理员" || image.ownerId === currentUser.id) && <button onClick={() => setDeleteCandidate(image)}>删除</button>}
-                  </div>
-                </div>
-              </article>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
+      <section className="ai-history-cta panel">
+        <div>
+          <span>▣</span>
+          <div>
+            <b>{loadingResults ? "正在同步历史作品" : results.length ? `已保存 ${results.length} 张历史作品` : "生成后的作品会自动进入生成历史"}</b>
+            <small>生成结果已移到「生成历史」大图页，素材库这里专注生图和模板。</small>
+          </div>
+        </div>
+        <button className="secondary-button" type="button" onClick={onOpenHistory}>查看生成历史 →</button>
+      </section>
 
       <section className="template-intro">
         <div>
@@ -503,20 +518,6 @@ export default function AssetsPage({ notify, currentUser }: { notify: (message: 
         </div>
       )}
 
-      {deleteCandidate && (
-        <div className="modal-backdrop" onMouseDown={() => !deleting && setDeleteCandidate(null)}>
-          <section className="modal asset-delete-dialog" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="logout-icon">⌫</div>
-            <span className="eyebrow">DELETE ASSET</span>
-            <h3>删除这张生成作品？</h3>
-            <p>图片文件和素材记录都会永久删除，此操作无法撤销。</p>
-            <div className="modal-actions">
-              <button className="secondary-button" disabled={deleting} onClick={() => setDeleteCandidate(null)}>取消</button>
-              <button className="danger-button" disabled={deleting} onClick={removeGeneratedImage}>{deleting ? "正在删除…" : "确认删除"}</button>
-            </div>
-          </section>
-        </div>
-      )}
     </div>
   );
 }

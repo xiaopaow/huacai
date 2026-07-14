@@ -6,7 +6,9 @@ export type PageKey =
   | "reviews"
   | "performance"
   | "listings"
+  | "listingHistory"
   | "assets"
+  | "assetHistory"
   | "settings";
 
 export type ProductStatus = "资料待完善" | "可生成" | "生产中" | "已交付";
@@ -74,9 +76,12 @@ export interface EmployeeMetric {
   role: string;
   skuCreated: number;
   imagesUploaded: number;
+  imagesGenerated: number;
   tasksCreated: number;
   reviewsCompleted: number;
   listingsDrafted: number;
+  listingsGenerated: number;
+  listingsSaved: number;
   listingsPublished: number;
   lastActiveAt: string | null;
 }
@@ -117,7 +122,47 @@ export interface AmazonListing {
   quantity: number;
   status: "草稿" | "待完善" | "基础通过" | "可提交" | "提交中" | "已发布" | "失败";
   ownerId: string;
+  ownerName?: string;
+  createdAt?: string;
+  lastEditedById?: string;
+  lastEditedByName?: string;
+  latestGenerationId?: string;
   asin?: string;
+  competitorUrl?: string;
+  competitorAsin?: string;
+  aiGeneratedAt?: string;
+  templateFileName?: string;
+  templateValues?: Record<string, string>;
   issues: string[];
   updatedAt: string;
+}
+
+export interface ListingGenerationRecord {
+  id: string;
+  listingId: string;
+  version: number;
+  sku: string;
+  marketplaceName: string;
+  productType: string;
+  brand: string;
+  generatedById: string;
+  generatedByName: string;
+  competitorAsin: string;
+  competitorUrl: string;
+  competitorTitle?: string;
+  model: string;
+  generationMode: "competitor_first";
+  title: string;
+  bulletPoints: string[];
+  description: string;
+  searchTerms: string;
+  compliance: {
+    compliant: boolean;
+    issues: Array<{ code: string; field: string; severity: "error" | "warning"; message: string; index?: number }>;
+  };
+  generatedAt: string;
+  adoptedAt?: string;
+  adoptedById?: string;
+  adoptedByName?: string;
+  savedCopy?: Pick<AmazonListing, "title" | "bulletPoints" | "description" | "searchTerms">;
 }

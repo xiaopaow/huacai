@@ -1,0 +1,859 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="3600" height="2200" viewBox="0 0 3600 2200">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#E9ECF4" stroke-width="1"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#26345F" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      text { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; text-anchor: middle; }
+      .title { font-size: 38px; font-weight: 800; fill: #202943; text-anchor: start; }
+      .subtitle { font-size: 18px; fill: #707A98; text-anchor: start; }
+      .section-label { font-size: 18px; font-weight: 800; fill: #66719B; letter-spacing: 3px; text-anchor: start; }
+      .entity rect { fill: #F7F9FF; stroke: #6677A8; stroke-width: 3; filter: url(#shadow); }
+      .entity.role rect { fill: #282C38; stroke: #282C38; }
+      .entity.external rect { fill: #F2F9E8; stroke: #7B9D3F; }
+      .entity-title { font-size: 24px; font-weight: 800; fill: #283455; }
+      .role .entity-title { fill: #FFFFFF; }
+      .external .entity-title { fill: #4E6F24; }
+      .entity-subtitle { font-size: 14px; fill: #7A85A4; }
+      .role .entity-subtitle { fill: #C5CAD9; }
+      .external .entity-subtitle { fill: #78924E; }
+      .relation polygon { fill: #FFBF27; stroke: #A66D00; stroke-width: 3; filter: url(#shadow); }
+      .relation-title { font-size: 19px; font-weight: 800; fill: #342600; }
+      .relation-step { font-size: 17px; font-weight: 900; fill: #835500; }
+      .attribute ellipse { fill: #EEF2FF; stroke: #8090BF; stroke-width: 2.5; }
+      .attribute.multi ellipse { fill: #F5F1FF; stroke: #7A65B7; }
+      .attribute-title { font-size: 16px; font-weight: 650; fill: #4B587F; }
+      .attribute-title.key { text-decoration: underline; font-weight: 850; }
+      .cardinality { font-size: 17px; font-weight: 900; fill: #485A8B; paint-order: stroke; stroke: #FFFFFF; stroke-width: 8px; stroke-linejoin: round; }
+      .note rect { fill: #FFFFFF; stroke: #D9DEEC; stroke-width: 2; filter: url(#shadow); }
+      .note-title { font-size: 20px; font-weight: 800; fill: #283455; text-anchor: start; }
+      .note-line { font-size: 16px; fill: #616C8C; text-anchor: start; }
+    </style>
+  </defs>
+  <rect width="100%" height="100%" fill="#FCFCFE"/>
+  <rect width="100%" height="100%" fill="url(#grid)"/>
+  <text class="title" x="70" y="64">花彩 Amazon Studio · 角色驱动系统流程 Chen ER 图</text>
+  <text class="subtitle" x="70" y="98">从员工角色、SKU 商品、视觉任务、素材与审核，到类目模板、Listing 和 Amazon 发布</text>
+  <text class="section-label" x="70" y="165">角色与权限</text>
+  <text class="section-label" x="70" y="750">核心生产与上架流程</text>
+  <text class="section-label" x="70" y="1280">素材、AI 与 Amazon 类目规则</text>
+  <text class="section-label" x="70" y="1880">通知、审计与数据安全</text>
+  <g id="edges"><line x1="340" y1="130" x2="340" y2="300" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="340" y="146.9">1</text>
+<text class="cardinality" x="340" y="259.1">N</text>
+<line x1="340" y1="300" x2="340" y2="480" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="340" y="318.6">1</text>
+<text class="cardinality" x="340" y="437.4">N</text>
+<line x1="340" y1="480" x2="555" y2="480" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="376.55" y="468">1</text>
+<text class="cardinality" x="518.45" y="468">N</text>
+<line x1="555" y1="480" x2="760" y2="480" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="589.85" y="468">1</text>
+<text class="cardinality" x="725.15" y="468">N</text>
+<line x1="340" y1="480" x2="95" y2="415" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="340" y1="480" x2="100" y2="520" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="340" y1="480" x2="340" y2="610" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="340" y1="480" x2="575" y2="610" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="760" y1="480" x2="770" y2="610" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1120" y1="130" x2="790" y2="600" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1063.9" y="197.9">M</text>
+<text class="cardinality" x="846.1" y="508.0999999999999">N</text>
+<line x1="790" y1="600" x2="520" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="744.1" y="652.6">M</text>
+<text class="cardinality" x="565.9" y="903.4">N</text>
+<line x1="1120" y1="130" x2="1260" y2="590" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1143.8" y="196.2">1</text>
+<text class="cardinality" x="1236.2" y="499.79999999999995">N</text>
+<line x1="340" y1="130" x2="1260" y2="590" stroke="#6677A8" stroke-width="3" stroke-dasharray="10 9"/>
+<text class="cardinality" x="496.4" y="196.2">1</text>
+<text class="cardinality" x="1103.6" y="499.79999999999995">N</text>
+<line x1="1260" y1="590" x2="1260" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1260" y="644.3">1</text>
+<text class="cardinality" x="1260" y="901.7">N</text>
+<line x1="1900" y1="130" x2="1660" y2="590" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1859.2" y="196.2">1</text>
+<text class="cardinality" x="1700.8" y="499.79999999999995">N</text>
+<line x1="1660" y1="590" x2="1260" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1592" y="644.3">1</text>
+<text class="cardinality" x="1328" y="901.7">N</text>
+<line x1="2680" y1="130" x2="2290" y2="590" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="2613.7" y="196.2">1</text>
+<text class="cardinality" x="2356.3" y="499.79999999999995">N</text>
+<line x1="340" y1="130" x2="2290" y2="590" stroke="#6677A8" stroke-width="3" stroke-dasharray="10 9"/>
+<text class="cardinality" x="671.5" y="196.2">1</text>
+<text class="cardinality" x="1958.5" y="499.79999999999995">N</text>
+<line x1="2290" y1="590" x2="1990" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="2239" y="644.3">1</text>
+<text class="cardinality" x="2041" y="901.7">N</text>
+<line x1="520" y1="980" x2="885" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="582.05" y="968">1</text>
+<text class="cardinality" x="822.95" y="968">N</text>
+<line x1="885" y1="980" x2="1260" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="948.75" y="968">1</text>
+<text class="cardinality" x="1196.25" y="968">N</text>
+<line x1="1260" y1="980" x2="1625" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1322.05" y="968">1</text>
+<text class="cardinality" x="1562.95" y="968">N</text>
+<line x1="1625" y1="980" x2="1990" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1687.05" y="968">1</text>
+<text class="cardinality" x="1927.95" y="968">N</text>
+<line x1="1990" y1="980" x2="2350" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="2051.2" y="968">M</text>
+<text class="cardinality" x="2288.8" y="968">N</text>
+<line x1="2350" y1="980" x2="2700" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="2409.5" y="968">M</text>
+<text class="cardinality" x="2640.5" y="968">N</text>
+<line x1="2700" y1="980" x2="3035" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="2756.95" y="968">N</text>
+<text class="cardinality" x="2978.05" y="968">1</text>
+<line x1="3035" y1="980" x2="3340" y2="980" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="3086.85" y="968">N</text>
+<text class="cardinality" x="3288.15" y="968">1</text>
+<line x1="520" y1="980" x2="310" y2="805" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="520" y1="980" x2="510" y2="785" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="520" y1="980" x2="705" y2="805" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="520" y1="980" x2="250" y2="930" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="520" y1="980" x2="250" y2="1045" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="520" y1="980" x2="510" y2="1145" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="520" y1="980" x2="730" y2="1115" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="980" x2="1050" y2="805" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="980" x2="1245" y2="785" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="980" x2="1450" y2="805" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="980" x2="1050" y2="1115" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="980" x2="1250" y2="1160" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="980" x2="1465" y2="1115" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1990" y1="980" x2="1780" y2="805" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1990" y1="980" x2="1980" y2="785" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1990" y1="980" x2="2200" y2="805" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1990" y1="980" x2="1800" y2="1115" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1990" y1="980" x2="2020" y2="1160" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="2700" y1="980" x2="2490" y2="805" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="2700" y1="980" x2="2690" y2="785" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="2700" y1="980" x2="2915" y2="805" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="2700" y1="980" x2="2470" y2="1115" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="2700" y1="980" x2="2680" y2="1160" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="2700" y1="980" x2="2900" y2="1115" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="2700" y1="980" x2="3040" y2="1070" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="3340" y1="980" x2="3290" y2="805" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="3340" y1="980" x2="3490" y2="805" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="3340" y1="980" x2="3440" y2="1130" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="980" x2="1260" y2="1305" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1260" y="1023.25">M</text>
+<text class="cardinality" x="1260" y="1237.75">N</text>
+<line x1="1260" y1="1305" x2="1260" y2="1560" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1260" y="1336.35">M</text>
+<text class="cardinality" x="1260" y="1504.65">N</text>
+<line x1="630" y1="1560" x2="930" y2="1560" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="681" y="1548">1</text>
+<text class="cardinality" x="879" y="1548">0..1</text>
+<line x1="930" y1="1560" x2="1260" y2="1560" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="986.1" y="1548">1</text>
+<text class="cardinality" x="1203.9" y="1548">0..1</text>
+<line x1="1900" y1="130" x2="1680" y2="1330" stroke="#6677A8" stroke-width="3" stroke-dasharray="10 9"/>
+<text class="cardinality" x="1862.6" y="322">1</text>
+<text class="cardinality" x="1717.4" y="1114">N</text>
+<line x1="1680" y1="1330" x2="1260" y2="1560" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1608.6" y="1357.1">1</text>
+<text class="cardinality" x="1331.4" y="1508.9">N</text>
+<line x1="1260" y1="1560" x2="1090" y2="1430" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="1560" x2="1430" y2="1430" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="1560" x2="1080" y2="1685" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="1560" x2="1440" y2="1685" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="630" y1="1560" x2="430" y2="1450" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="630" y1="1560" x2="630" y2="1410" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="630" y1="1560" x2="830" y2="1450" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="630" y1="1560" x2="630" y2="1700" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="2700" y1="980" x2="2580" y2="1305" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="2679.6" y="1023.25">N</text>
+<text class="cardinality" x="2600.4" y="1237.75">1</text>
+<line x1="2580" y1="1305" x2="2450" y2="1560" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="2557.9" y="1336.35">N</text>
+<text class="cardinality" x="2472.1" y="1504.65">1</text>
+<line x1="2700" y1="980" x2="2910" y2="1305" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="2735.7" y="1023.25">N</text>
+<text class="cardinality" x="2874.3" y="1237.75">1</text>
+<line x1="2910" y1="1305" x2="3030" y2="1560" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="2930.4" y="1336.35">N</text>
+<text class="cardinality" x="3009.6" y="1504.65">1</text>
+<line x1="2450" y1="1560" x2="2280" y2="1715" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="2450" y1="1560" x2="2600" y2="1750" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="3030" y1="1560" x2="2920" y2="1715" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="3030" y1="1560" x2="3200" y2="1715" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1260" y1="980" x2="1600" y2="1775" stroke="#6677A8" stroke-width="3" stroke-dasharray="10 9"/>
+<text class="cardinality" x="1317.8" y="1103.15">1</text>
+<text class="cardinality" x="1542.2" y="1627.85">N</text>
+<line x1="1990" y1="980" x2="1600" y2="1775" stroke="#6677A8" stroke-width="3" stroke-dasharray="10 9"/>
+<text class="cardinality" x="1923.7" y="1103.15">1</text>
+<text class="cardinality" x="1666.3" y="1627.85">N</text>
+<line x1="1600" y1="1775" x2="1850" y2="1960" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1642.5" y="1794.45">1</text>
+<text class="cardinality" x="1807.5" y="1916.55">N</text>
+<line x1="340" y1="480" x2="1190" y2="1840" stroke="#6677A8" stroke-width="3" stroke-dasharray="10 9"/>
+<text class="cardinality" x="484.5" y="699.2">1</text>
+<text class="cardinality" x="1045.5" y="1596.8">N</text>
+<line x1="1190" y1="1840" x2="1850" y2="1960" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="1302.2" y="1848.4">1</text>
+<text class="cardinality" x="1737.8" y="1927.6">N</text>
+<line x1="340" y1="480" x2="660" y2="1780" stroke="#6677A8" stroke-width="3" stroke-dasharray="10 9"/>
+<text class="cardinality" x="394.4" y="689">1</text>
+<text class="cardinality" x="605.5999999999999" y="1547">N</text>
+<line x1="660" y1="1780" x2="900" y2="1960" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="700.8" y="1798.6">1</text>
+<text class="cardinality" x="859.2" y="1917.4">N</text>
+<line x1="340" y1="130" x2="340" y2="1780" stroke="#6677A8" stroke-width="3" stroke-dasharray="10 9"/>
+<text class="cardinality" x="340" y="398.5">1</text>
+<text class="cardinality" x="340" y="1487.5">N</text>
+<line x1="340" y1="1780" x2="340" y2="1960" stroke="#6677A8" stroke-width="3"/>
+<text class="cardinality" x="340" y="1798.6">1</text>
+<text class="cardinality" x="340" y="1917.4">N</text>
+<line x1="340" y1="130" x2="900" y2="1960" stroke="#6677A8" stroke-width="3" stroke-dasharray="10 9"/>
+<text class="cardinality" x="435.2" y="429.1">1</text>
+<text class="cardinality" x="804.8" y="1636.8999999999999">N</text>
+<line x1="1850" y1="1960" x2="1710" y2="2070" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="1850" y1="1960" x2="1990" y2="2070" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="900" y1="1960" x2="780" y2="2080" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="900" y1="1960" x2="1030" y2="2080" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="340" y1="1960" x2="180" y2="2080" stroke="#94A1C7" stroke-width="2"/>
+
+
+<line x1="340" y1="1960" x2="500" y2="2080" stroke="#94A1C7" stroke-width="2"/>
+
+</g>
+  <g id="nodes">
+    <g id="admin" class="entity role">
+      <rect x="215" y="84" width="250" height="92" rx="18"/>
+      <text class="entity-title" x="340" y="124">管理员</text>
+      <text class="entity-subtitle" x="340" y="153">账号 · 权限 · 统计 · 备份</text>
+    </g>
+
+    <g id="operator" class="entity role">
+      <rect x="995" y="84" width="250" height="92" rx="18"/>
+      <text class="entity-title" x="1120" y="124">运营</text>
+      <text class="entity-subtitle" x="1120" y="153">SKU · 派单 · Listing</text>
+    </g>
+
+    <g id="designer" class="entity role">
+      <rect x="1775" y="84" width="250" height="92" rx="18"/>
+      <text class="entity-title" x="1900" y="124">设计</text>
+      <text class="entity-subtitle" x="1900" y="153">制作 · AI · 版本提交</text>
+    </g>
+
+    <g id="reviewer" class="entity role">
+      <rect x="2555" y="84" width="250" height="92" rx="18"/>
+      <text class="entity-title" x="2680" y="124">审核</text>
+      <text class="entity-subtitle" x="2680" y="153">检查 · 通过 · 驳回</text>
+    </g>
+
+    <g id="employee" class="entity">
+      <rect x="215" y="434" width="250" height="92" rx="18"/>
+      <text class="entity-title" x="340" y="474">员工账号</text>
+      <text class="entity-subtitle" x="340" y="503">Employee</text>
+    </g>
+
+    <g id="session" class="entity">
+      <rect x="650" y="434" width="220" height="92" rx="18"/>
+      <text class="entity-title" x="760" y="474">登录会话</text>
+      <text class="entity-subtitle" x="760" y="503">AuthSession</text>
+    </g>
+
+    <g id="manage-account" class="relation">
+      <polygon points="340,244 435,300 340,356 245,300"/>
+
+      <text class="relation-title" x="340" y="307">管理账号</text>
+    </g>
+
+    <g id="login" class="relation">
+      <polygon points="555,424 650,480 555,536 460,480"/>
+
+      <text class="relation-title" x="555" y="487">登录</text>
+    </g>
+
+    <g id="employee-name" class="attribute">
+      <ellipse cx="95" cy="415" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="95" y="422">姓名</text>
+    </g>
+
+    <g id="employee-dept" class="attribute">
+      <ellipse cx="100" cy="520" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="100" y="527">部门</text>
+    </g>
+
+    <g id="employee-role" class="attribute">
+      <ellipse cx="340" cy="610" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="340" y="617">角色</text>
+    </g>
+
+    <g id="employee-active" class="attribute">
+      <ellipse cx="575" cy="610" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="575" y="617">启用状态</text>
+    </g>
+
+    <g id="session-expire" class="attribute">
+      <ellipse cx="770" cy="610" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="770" y="617">过期时间</text>
+    </g>
+
+    <g id="product" class="entity">
+      <rect x="385" y="934" width="270" height="92" rx="18"/>
+      <text class="entity-title" x="520" y="974">SKU 商品</text>
+      <text class="entity-subtitle" x="520" y="1003">Product</text>
+    </g>
+
+    <g id="task" class="entity">
+      <rect x="1110" y="934" width="300" height="92" rx="18"/>
+      <text class="entity-title" x="1260" y="974">视觉生产任务</text>
+      <text class="entity-subtitle" x="1260" y="1003">Task</text>
+    </g>
+
+    <g id="review" class="entity">
+      <rect x="1855" y="934" width="270" height="92" rx="18"/>
+      <text class="entity-title" x="1990" y="974">审核记录</text>
+      <text class="entity-subtitle" x="1990" y="1003">ReviewRecord</text>
+    </g>
+
+    <g id="listing" class="entity">
+      <rect x="2540" y="934" width="320" height="92" rx="18"/>
+      <text class="entity-title" x="2700" y="974">Amazon Listing</text>
+      <text class="entity-subtitle" x="2700" y="1003">Listing</text>
+    </g>
+
+    <g id="store" class="entity external">
+      <rect x="3200" y="934" width="280" height="92" rx="18"/>
+      <text class="entity-title" x="3340" y="974">Amazon 店铺</text>
+      <text class="entity-subtitle" x="3340" y="1003">Seller Central / SP-API</text>
+    </g>
+
+    <g id="maintain" class="relation">
+      <polygon points="790,544 885,600 790,656 695,600"/>
+      <text class="relation-step" x="790" y="590">①</text>
+      <text class="relation-title" x="790" y="617">维护商品</text>
+    </g>
+
+    <g id="assign" class="relation">
+      <polygon points="1260,534 1355,590 1260,646 1165,590"/>
+      <text class="relation-step" x="1260" y="580">②</text>
+      <text class="relation-title" x="1260" y="607">创建 / 派单</text>
+    </g>
+
+    <g id="execute" class="relation">
+      <polygon points="1660,534 1755,590 1660,646 1565,590"/>
+      <text class="relation-step" x="1660" y="580">③</text>
+      <text class="relation-title" x="1660" y="607">执行 / 提交</text>
+    </g>
+
+    <g id="audit" class="relation">
+      <polygon points="2290,534 2385,590 2290,646 2195,590"/>
+      <text class="relation-step" x="2290" y="580">④</text>
+      <text class="relation-title" x="2290" y="607">审核版本</text>
+    </g>
+
+    <g id="produce-task" class="relation">
+      <polygon points="885,924 980,980 885,1036 790,980"/>
+      <text class="relation-step" x="885" y="970">⑤</text>
+      <text class="relation-title" x="885" y="997">发起生产</text>
+    </g>
+
+    <g id="produce-review" class="relation">
+      <polygon points="1625,924 1720,980 1625,1036 1530,980"/>
+      <text class="relation-step" x="1625" y="970">⑥</text>
+      <text class="relation-title" x="1625" y="997">版本审核</text>
+    </g>
+
+    <g id="deliver" class="relation">
+      <polygon points="2350,924 2445,980 2350,1036 2255,980"/>
+      <text class="relation-step" x="2350" y="970">⑦</text>
+      <text class="relation-title" x="2350" y="997">通过后交付</text>
+    </g>
+
+    <g id="publish" class="relation">
+      <polygon points="3035,924 3130,980 3035,1036 2940,980"/>
+      <text class="relation-step" x="3035" y="970">⑧</text>
+      <text class="relation-title" x="3035" y="997">提交发布</text>
+    </g>
+
+    <g id="product-sku" class="attribute">
+      <ellipse cx="310" cy="805" rx="114.5" ry="34"/>
+
+      <text class="attribute-title key" x="310" y="812">SKU（唯一）</text>
+    </g>
+
+    <g id="product-asin" class="attribute">
+      <ellipse cx="510" cy="785" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="510" y="792">ASIN</text>
+    </g>
+
+    <g id="product-name" class="attribute">
+      <ellipse cx="705" cy="805" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="705" y="812">商品名称</text>
+    </g>
+
+    <g id="product-brand" class="attribute">
+      <ellipse cx="250" cy="930" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="250" y="937">品牌</text>
+    </g>
+
+    <g id="product-category" class="attribute">
+      <ellipse cx="250" cy="1045" rx="139.5" ry="34"/>
+
+      <text class="attribute-title" x="250" y="1052">Amazon 类目</text>
+    </g>
+
+    <g id="product-market" class="attribute">
+      <ellipse cx="510" cy="1145" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="510" y="1152">目标站点</text>
+    </g>
+
+    <g id="product-status" class="attribute">
+      <ellipse cx="730" cy="1115" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="730" y="1122">商品状态</text>
+    </g>
+
+    <g id="task-id" class="attribute">
+      <ellipse cx="1050" cy="805" rx="77" ry="34"/>
+
+      <text class="attribute-title key" x="1050" y="812">任务编号</text>
+    </g>
+
+    <g id="task-type" class="attribute">
+      <ellipse cx="1245" cy="785" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="1245" y="792">任务类型</text>
+    </g>
+
+    <g id="task-assignee" class="attribute">
+      <ellipse cx="1450" cy="805" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="1450" y="812">负责人</text>
+    </g>
+
+    <g id="task-due" class="attribute">
+      <ellipse cx="1050" cy="1115" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="1050" y="1122">截止时间</text>
+    </g>
+
+    <g id="task-status" class="attribute">
+      <ellipse cx="1250" cy="1160" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="1250" y="1167">任务状态</text>
+    </g>
+
+    <g id="task-version" class="attribute">
+      <ellipse cx="1465" cy="1115" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="1465" y="1122">成品版本</text>
+    </g>
+
+    <g id="review-version" class="attribute">
+      <ellipse cx="1780" cy="805" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="1780" y="812">审核版本</text>
+    </g>
+
+    <g id="review-result" class="attribute">
+      <ellipse cx="1980" cy="785" rx="114.5" ry="34"/>
+
+      <text class="attribute-title" x="1980" y="792">通过 / 驳回</text>
+    </g>
+
+    <g id="review-comment" class="attribute">
+      <ellipse cx="2200" cy="805" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="2200" y="812">审核意见</text>
+    </g>
+
+    <g id="reviewer-name" class="attribute">
+      <ellipse cx="1800" cy="1115" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="1800" y="1122">审核人</text>
+    </g>
+
+    <g id="review-time" class="attribute">
+      <ellipse cx="2020" cy="1160" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="2020" y="1167">审核时间</text>
+    </g>
+
+    <g id="listing-id" class="attribute">
+      <ellipse cx="2490" cy="805" rx="152" ry="34"/>
+
+      <text class="attribute-title key" x="2490" y="812">Listing 编号</text>
+    </g>
+
+    <g id="listing-sku" class="attribute">
+      <ellipse cx="2690" cy="785" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="2690" y="792">SKU</text>
+    </g>
+
+    <g id="listing-pt" class="attribute">
+      <ellipse cx="2915" cy="805" rx="177" ry="34"/>
+
+      <text class="attribute-title" x="2915" y="812">Product Type</text>
+    </g>
+
+    <g id="listing-site" class="attribute">
+      <ellipse cx="2470" cy="1115" rx="202" ry="34"/>
+
+      <text class="attribute-title" x="2470" y="1122">Marketplace ID</text>
+    </g>
+
+    <g id="listing-price" class="attribute">
+      <ellipse cx="2680" cy="1160" rx="114.5" ry="34"/>
+
+      <text class="attribute-title" x="2680" y="1167">价格 / 币种</text>
+    </g>
+
+    <g id="listing-stock" class="attribute">
+      <ellipse cx="2900" cy="1115" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="2900" y="1122">库存</text>
+    </g>
+
+    <g id="listing-status" class="attribute">
+      <ellipse cx="3040" cy="1070" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="3040" y="1077">发布状态</text>
+    </g>
+
+    <g id="store-seller" class="attribute">
+      <ellipse cx="3290" cy="805" rx="139.5" ry="34"/>
+
+      <text class="attribute-title" x="3290" y="812">Seller ID</text>
+    </g>
+
+    <g id="store-auth" class="attribute">
+      <ellipse cx="3490" cy="805" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="3490" y="812">授权状态</text>
+    </g>
+
+    <g id="store-mode" class="attribute">
+      <ellipse cx="3440" cy="1130" rx="114.5" ry="34"/>
+
+      <text class="attribute-title" x="3440" y="1137">沙盒 / 正式</text>
+    </g>
+
+    <g id="asset" class="entity">
+      <rect x="1120" y="1514" width="280" height="92" rx="18"/>
+      <text class="entity-title" x="1260" y="1554">图片素材</text>
+      <text class="entity-subtitle" x="1260" y="1583">Uploaded / Generated Asset</text>
+    </g>
+
+    <g id="ai-job" class="entity">
+      <rect x="495" y="1514" width="270" height="92" rx="18"/>
+      <text class="entity-title" x="630" y="1554">AI 生图任务</text>
+      <text class="entity-subtitle" x="630" y="1583">ImageJob</text>
+    </g>
+
+    <g id="use-asset" class="relation">
+      <polygon points="1260,1249 1355,1305 1260,1361 1165,1305"/>
+
+      <text class="relation-title" x="1260" y="1312">使用素材</text>
+    </g>
+
+    <g id="ai-generate" class="relation">
+      <polygon points="930,1504 1025,1560 930,1616 835,1560"/>
+
+      <text class="relation-title" x="930" y="1567">生成</text>
+    </g>
+
+    <g id="designer-upload" class="relation">
+      <polygon points="1680,1274 1775,1330 1680,1386 1585,1330"/>
+
+      <text class="relation-title" x="1680" y="1337">上传 / 生成</text>
+    </g>
+
+    <g id="asset-id" class="attribute">
+      <ellipse cx="1090" cy="1430" rx="77" ry="34"/>
+
+      <text class="attribute-title key" x="1090" y="1437">素材编号</text>
+    </g>
+
+    <g id="asset-purpose" class="attribute">
+      <ellipse cx="1430" cy="1430" rx="352" ry="34"/>
+
+      <text class="attribute-title" x="1430" y="1437">input / output / reference</text>
+    </g>
+
+    <g id="asset-owner" class="attribute">
+      <ellipse cx="1080" cy="1685" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="1080" y="1692">所有人</text>
+    </g>
+
+    <g id="asset-file" class="attribute">
+      <ellipse cx="1440" cy="1685" rx="139.5" ry="34"/>
+
+      <text class="attribute-title" x="1440" y="1692">文件类型 / 大小</text>
+    </g>
+
+    <g id="ai-model" class="attribute">
+      <ellipse cx="430" cy="1450" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="430" y="1457">模型</text>
+    </g>
+
+    <g id="ai-prompt" class="attribute">
+      <ellipse cx="630" cy="1410" rx="75" ry="34"/>
+
+      <text class="attribute-title" x="630" y="1417">提示词</text>
+    </g>
+
+    <g id="ai-progress" class="attribute">
+      <ellipse cx="830" cy="1450" rx="139.5" ry="34"/>
+
+      <text class="attribute-title" x="830" y="1457">进度 / 重试次数</text>
+    </g>
+
+    <g id="ai-status" class="attribute">
+      <ellipse cx="630" cy="1700" rx="464.5" ry="34"/>
+
+      <text class="attribute-title" x="630" y="1707">queued / running / success / failed</text>
+    </g>
+
+    <g id="template" class="entity">
+      <rect x="2295" y="1514" width="310" height="92" rx="18"/>
+      <text class="entity-title" x="2450" y="1554">Amazon 类目模板</text>
+      <text class="entity-subtitle" x="2450" y="1583">XLSM / XLSX</text>
+    </g>
+
+    <g id="ptd" class="entity external">
+      <rect x="2885" y="1514" width="290" height="92" rx="18"/>
+      <text class="entity-title" x="3030" y="1554">官方 PTD 规则</text>
+      <text class="entity-subtitle" x="3030" y="1583">Product Type Definition</text>
+    </g>
+
+    <g id="apply-template" class="relation">
+      <polygon points="2580,1249 2675,1305 2580,1361 2485,1305"/>
+
+      <text class="relation-title" x="2580" y="1312">应用模板</text>
+    </g>
+
+    <g id="match-ptd" class="relation">
+      <polygon points="2910,1249 3005,1305 2910,1361 2815,1305"/>
+
+      <text class="relation-title" x="2910" y="1312">匹配规则</text>
+    </g>
+
+    <g id="template-fields" class="attribute multi">
+      <ellipse cx="2280" cy="1715" rx="77" ry="34"/>
+      <ellipse cx="2280" cy="1715" rx="70" ry="27"/>
+      <text class="attribute-title" x="2280" y="1722">类目字段</text>
+    </g>
+
+    <g id="template-required" class="attribute">
+      <ellipse cx="2600" cy="1750" rx="139.5" ry="34"/>
+
+      <text class="attribute-title" x="2600" y="1757">必填 / 条件必填</text>
+    </g>
+
+    <g id="ptd-version" class="attribute">
+      <ellipse cx="2920" cy="1715" rx="139.5" ry="34"/>
+
+      <text class="attribute-title" x="2920" y="1722">Schema 版本</text>
+    </g>
+
+    <g id="ptd-enum" class="attribute multi">
+      <ellipse cx="3200" cy="1715" rx="139.5" ry="34"/>
+      <ellipse cx="3200" cy="1715" rx="132.5" ry="27"/>
+      <text class="attribute-title" x="3200" y="1722">枚举 / 校验规则</text>
+    </g>
+
+    <g id="notification" class="entity">
+      <rect x="1725" y="1914" width="250" height="92" rx="18"/>
+      <text class="entity-title" x="1850" y="1954">站内通知</text>
+      <text class="entity-subtitle" x="1850" y="1983">Notification</text>
+    </g>
+
+    <g id="activity" class="entity">
+      <rect x="775" y="1914" width="250" height="92" rx="18"/>
+      <text class="entity-title" x="900" y="1954">操作记录</text>
+      <text class="entity-subtitle" x="900" y="1983">ActivityEvent</text>
+    </g>
+
+    <g id="backup" class="entity">
+      <rect x="215" y="1914" width="250" height="92" rx="18"/>
+      <text class="entity-title" x="340" y="1954">备份快照</text>
+      <text class="entity-subtitle" x="340" y="1983">DB + Images</text>
+    </g>
+
+    <g id="trigger-notice" class="relation">
+      <polygon points="1600,1719 1695,1775 1600,1831 1505,1775"/>
+
+      <text class="relation-title" x="1600" y="1782">触发通知</text>
+    </g>
+
+    <g id="receive-notice" class="relation">
+      <polygon points="1190,1784 1285,1840 1190,1896 1095,1840"/>
+
+      <text class="relation-title" x="1190" y="1847">接收</text>
+    </g>
+
+    <g id="record-action" class="relation">
+      <polygon points="660,1724 755,1780 660,1836 565,1780"/>
+
+      <text class="relation-title" x="660" y="1787">记录操作</text>
+    </g>
+
+    <g id="maintain-backup" class="relation">
+      <polygon points="340,1724 435,1780 340,1836 245,1780"/>
+
+      <text class="relation-title" x="340" y="1787">备份 / 恢复</text>
+    </g>
+
+    <g id="notice-type" class="attribute">
+      <ellipse cx="1710" cy="2070" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="1710" y="2077">通知类型</text>
+    </g>
+
+    <g id="notice-read" class="attribute">
+      <ellipse cx="1990" cy="2070" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="1990" y="2077">已读时间</text>
+    </g>
+
+    <g id="activity-type" class="attribute">
+      <ellipse cx="780" cy="2080" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="780" y="2087">操作类型</text>
+    </g>
+
+    <g id="activity-entity" class="attribute">
+      <ellipse cx="1030" cy="2080" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="1030" y="2087">业务对象</text>
+    </g>
+
+    <g id="backup-time" class="attribute">
+      <ellipse cx="180" cy="2080" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="180" y="2087">创建时间</text>
+    </g>
+
+    <g id="backup-assets" class="attribute">
+      <ellipse cx="500" cy="2080" rx="77" ry="34"/>
+
+      <text class="attribute-title" x="500" y="2087">包含图片</text>
+    </g>
+
+    <g class="note">
+      <rect x="2740" y="1870" width="800" height="188" rx="18"/>
+      <rect x="2740" y="1870" width="8" height="188" rx="4" fill="#D99B19"/>
+      <text class="note-title" x="2768" y="1905">图例与实现说明</text>
+      <text class="note-line" x="2768" y="1940">矩形 = 实体；菱形 = 业务关系；椭圆 = 关键属性</text><text class="note-line" x="2768" y="1970">1 / N / M = 关系基数；虚线 = 管理、通知或审计旁路</text><text class="note-line" x="2768" y="2000">Listing 当前通过 SKU 逻辑关联商品，后续建议增加 productId</text><text class="note-line" x="2768" y="2030">图片二进制存储在 data/uploads，数据库保存元数据和归属</text>
+    </g></g>
+</svg>

@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { JSONFilePreset } from "lowdb/node";
 import bcrypt from "bcryptjs";
+import { dedupeLocalListingDrafts } from "./listingRules.js";
 import type { DatabaseSchema } from "./types.js";
 
 const dataDirectory = join(process.cwd(), "data");
@@ -12,43 +13,11 @@ const initialEmployeePassword = process.env.INITIAL_EMPLOYEE_PASSWORD ?? "Employ
 const defaultData: DatabaseSchema = {
   employees: [
     { id: "emp-zhang", username: "admin", passwordHash: bcrypt.hashSync(initialAdminPassword, 10), name: "张宁", department: "Amazon 运营", role: "管理员", active: true, mustChangePassword: true },
-    { id: "emp-lin", username: "designer", passwordHash: bcrypt.hashSync(initialEmployeePassword, 10), name: "林晓", department: "视觉设计", role: "设计", active: true, mustChangePassword: true },
-    { id: "emp-chen", username: "reviewer", passwordHash: bcrypt.hashSync(initialEmployeePassword, 10), name: "陈璐", department: "商品审核", role: "审核", active: true, mustChangePassword: true },
   ],
   sessions: [],
-  activities: [
-    { id: "act-seed-1", employeeId: "emp-zhang", type: "SKU_CREATED", entityType: "product", entityId: "prd-001", quantity: 4, createdAt: new Date(Date.now() - 86400000).toISOString() },
-    { id: "act-seed-2", employeeId: "emp-zhang", type: "TASK_CREATED", entityType: "task", entityId: "TSK-018", quantity: 6, createdAt: new Date(Date.now() - 7200000).toISOString() },
-    { id: "act-seed-3", employeeId: "emp-lin", type: "IMAGE_UPLOADED", entityType: "asset", entityId: "asset-batch-1", quantity: 18, createdAt: new Date(Date.now() - 10800000).toISOString() },
-    { id: "act-seed-4", employeeId: "emp-chen", type: "REVIEW_APPROVED", entityType: "review", entityId: "review-1", quantity: 5, createdAt: new Date(Date.now() - 5400000).toISOString() },
-  ],
-  listings: [
-    {
-      id: "lst-001",
-      sku: "HC-HDP-001",
-      marketplaceId: "ATVPDKIKX0DER",
-      marketplaceName: "美国站",
-      productType: "HEADPHONES",
-      title: "FLORA Wireless Over-Ear Headphones with Active Noise Cancellation",
-      brand: "FLORA",
-      description: "Comfortable wireless headphones designed for work, travel and everyday listening.",
-      bulletPoints: [
-        "Active noise cancellation for focused listening",
-        "Comfortable over-ear cushions for extended wear",
-        "Stable wireless connection and clear calls",
-        "Foldable design for travel and storage",
-        "Long-lasting battery for everyday use"
-      ],
-      searchTerms: "wireless headphones noise cancelling over ear travel",
-      price: 59.99,
-      currency: "USD",
-      quantity: 100,
-      status: "待完善",
-      ownerId: "emp-zhang",
-      issues: ["缺少外部商品编码及 Amazon 类目必填属性"],
-      updatedAt: new Date().toISOString(),
-    },
-  ],
+  activities: [],
+  listings: [],
+  listingGenerations: [],
   generatedAssets: [],
   uploadedAssets: [],
   products: [],
@@ -63,6 +32,10 @@ export const db = await JSONFilePreset<DatabaseSchema>(
 );
 
 let migrated = false;
+if (!Array.isArray(db.data.listingGenerations)) {
+  db.data.listingGenerations = [];
+  migrated = true;
+}
 if (!Array.isArray(db.data.sessions)) {
   db.data.sessions = [];
   migrated = true;
@@ -91,7 +64,32 @@ if (!Array.isArray(db.data.notifications)) {
   db.data.notifications = [];
   migrated = true;
 }
+for (const asset of db.data.uploadedAssets) {
+  if (asset.purpose) continue;
+  const task = db.data.tasks.find((item) => item.id === asset.taskId);
+  asset.purpose = task?.outputAssetIds?.includes(asset.id)
+    ? "output"
+    : task?.inputAssetIds?.includes(asset.id)
+      ? "input"
+      : asset.taskId.startsWith("studio-")
+        ? "reference"
+        : "input";
+  migrated = true;
+}
+for (const asset of db.data.generatedAssets) {
+  if (asset.ownerName) continue;
+  asset.ownerName = db.data.employees.find((employee) => employee.id === asset.ownerId)?.name ?? "历史账号";
+  migrated = true;
+}
 for (const job of db.data.imageJobs) {
+  if (!job.count) {
+    job.count = 1;
+    migrated = true;
+  }
+  if (job.resultAssetId && !Array.isArray(job.resultAssetIds)) {
+    job.resultAssetIds = [job.resultAssetId];
+    migrated = true;
+  }
   if (job.status === "running") {
     job.status = "queued";
     job.progress = 0;
@@ -119,6 +117,22 @@ for (const employee of db.data.employees) {
     migrated = true;
   }
 }
+for (const listing of db.data.listings) {
+  const owner = db.data.employees.find((employee) => employee.id === listing.ownerId);
+  if (!listing.ownerName) {
+    listing.ownerName = owner?.name ?? "历史账号";
+    migrated = true;
+  }
+  if (!listing.createdAt) {
+    listing.createdAt = listing.updatedAt;
+    migrated = true;
+  }
+  if (!listing.lastEditedById) {
+    listing.lastEditedById = listing.ownerId;
+    listing.lastEditedByName = listing.ownerName;
+    migrated = true;
+  }
+}
 if (!process.env.AMAZON_REFRESH_TOKEN) {
   for (const listing of db.data.listings) {
     if (listing.status === "可提交") {
@@ -126,5 +140,10 @@ if (!process.env.AMAZON_REFRESH_TOKEN) {
       migrated = true;
     }
   }
+}
+const dedupedListings = dedupeLocalListingDrafts(db.data.listings);
+if (dedupedListings.removed.length) {
+  db.data.listings = dedupedListings.listings;
+  migrated = true;
 }
 if (migrated) await db.write();

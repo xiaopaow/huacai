@@ -1,27 +1,29 @@
-import { useEffect, useMemo, useState } from "react";
-import { initialProducts, initialTasks } from "./data/mock";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  bootstrapWorkspace,
   createWorkspaceProduct,
   createWorkspaceTask,
   deleteAssets,
   deleteWorkspaceProduct,
   getAssetObjectUrl,
   getCurrentUser,
+  getListings,
+  getMyStatistics,
   getNotifications,
   getTeamDirectory,
   getWorkspace,
   getWorkspaceSummary,
   hasAuthToken,
+  importWorkspaceProducts,
   logout,
   markAllNotificationsRead,
   markNotificationRead,
-  recordActivity,
   reviewWorkspaceTask,
   submitWorkspaceTaskOutputs,
   updateWorkspaceTaskAssignment,
   updateWorkspaceProduct,
   uploadTaskImages,
+  type GeneratedImage,
+  type PersonalStatistics,
   type WorkspaceNotification,
 } from "./lib/api";
 import ListingsPage from "./pages/ListingsPage";
@@ -29,8 +31,35 @@ import LoginPage from "./pages/LoginPage";
 import PerformancePage from "./pages/PerformancePage";
 import SettingsPage from "./pages/SettingsPage";
 import AssetsPage from "./pages/AssetsPage";
+import GeneratedHistoryPage from "./pages/GeneratedHistoryPage";
+import ListingHistoryPage from "./pages/ListingHistoryPage";
+import { canAccessPage, firstAccessiblePage } from "./lib/pageAccess";
+import { evaluateProductReadiness, type ProductReadiness } from "./lib/productReadiness";
+import LogoutDialog from "./components/LogoutDialog";
+import ProductDeleteDialog from "./components/ProductDeleteDialog";
+import ProductImportDialog from "./components/ProductImportDialog";
+import HelpCenterDialog from "./components/HelpCenterDialog";
+import ecommerceHeroImage from "./assets/ecommerce-hero-v1.png";
+import {
+  expectedTaskInputCount,
+  expectedTaskOutputCount,
+  isWorkflowTaskOverdue,
+  nextTaskAction,
+  reviewRejectionCommentMessage,
+  taskInputCreationMessage,
+  taskOutputSubmissionMessage,
+  taskWorkflowStage,
+} from "./lib/taskWorkflow";
+import { listingHandoffForTask } from "./lib/listingHandoff";
+import {
+  notificationActionLabel,
+  notificationIcon,
+  notificationMetaLine,
+  notificationTargetPage,
+} from "./lib/notificationWorkflow";
 import type { InspirationTemplate } from "./data/templates";
 import type {
+  AmazonListing,
   GenerationTask,
   EmployeeAccount,
   Marketplace,
@@ -40,17 +69,19 @@ import type {
   WorkspaceState,
 } from "./types/domain";
 
-const storageKey = "huacai-amazon-workspace-v1";
+const storageKey = "huacai-amazon-workspace-v2";
 
 const navItems: Array<{ key: PageKey; icon: string; label: string }> = [
   { key: "dashboard", icon: "⌂", label: "工作台" },
   { key: "products", icon: "◇", label: "SKU 商品库" },
   { key: "create", icon: "✦", label: "新建生成任务" },
   { key: "listings", icon: "A", label: "Listing 中心" },
+  { key: "listingHistory", icon: "◫", label: "Listing 历史" },
   { key: "tasks", icon: "▤", label: "任务中心" },
   { key: "reviews", icon: "✓", label: "审核中心" },
   { key: "performance", icon: "↗", label: "员工效率" },
   { key: "assets", icon: "▧", label: "素材库" },
+  { key: "assetHistory", icon: "▣", label: "生成历史" },
   { key: "settings", icon: "⚙", label: "系统设置" },
 ];
 
@@ -58,23 +89,15 @@ const titles: Record<PageKey, { title: string; sub: string }> = {
   dashboard: { title: "Amazon 视觉工作台", sub: "今天也让每个 SKU 更接近成交。" },
   products: { title: "SKU 商品库", sub: "统一维护商品资料、原图和站点信息。" },
   create: { title: "新建生成任务", sub: "从商品资料开始，生成完整 Amazon Listing 套图。" },
-  listings: { title: "Amazon Listing 中心", sub: "编写、检查并准备提交多站点商品资料。" },
+  listings: { title: "AI Listing 工作台", sub: "输入单个竞品链接，生成、检查并保存 Amazon 文案草稿。" },
+  listingHistory: { title: "Listing 历史库", sub: "查看每次 AI 生成版本、创建人、规则结果并恢复内容。" },
   tasks: { title: "任务中心", sub: "跟踪生成进度、失败任务与交付状态。" },
   reviews: { title: "审核中心", sub: "集中处理待审核图片和修改意见。" },
   performance: { title: "员工效率后台", sub: "基于真实操作记录查看团队产出与流程瓶颈。" },
   assets: { title: "素材库", sub: "管理品牌、商品原图和已交付视觉资产。" },
+  assetHistory: { title: "生成历史", sub: "大图浏览、下载和复用团队 AI 生图作品。" },
   settings: { title: "系统设置", sub: "管理团队、权限、品牌规范和模型策略。" },
 };
-
-function canAccessPage(role: EmployeeAccount["role"], page: PageKey) {
-  if (role === "管理员") return true;
-  const permissions: Record<Exclude<EmployeeAccount["role"], "管理员">, PageKey[]> = {
-    "运营": ["dashboard", "products", "create", "listings", "tasks", "assets", "settings"],
-    "设计": ["dashboard", "create", "tasks", "assets", "settings"],
-    "审核": ["dashboard", "tasks", "reviews", "assets", "settings"],
-  };
-  return permissions[role].includes(page);
-}
 
 function loadWorkspace(): WorkspaceState {
   try {
@@ -83,7 +106,7 @@ function loadWorkspace(): WorkspaceState {
   } catch {
     // Storage may be unavailable in private browsing.
   }
-  return { products: initialProducts, tasks: initialTasks };
+  return { products: [], tasks: [] };
 }
 
 function App() {
@@ -96,6 +119,8 @@ function App() {
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [workspaceSummary, setWorkspaceSummary] = useState({
     generatedThisMonth: 0,
+    listingsGeneratedThisMonth: 0,
+    statisticsScope: "personal" as "team" | "personal",
     monthlyQuota: 500,
     activeImageJobs: 0,
   });
@@ -103,8 +128,12 @@ function App() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [logoutConfirm, setLogoutConfirm] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const accountTriggerRef = useRef<HTMLButtonElement>(null);
   const [notifications, setNotifications] = useState<WorkspaceNotification[]>([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [notificationTargetId, setNotificationTargetId] = useState("");
+  const [listingFocusSku, setListingFocusSku] = useState("");
   const pendingReviewCount = workspace.tasks.filter((task) => task.status === "待审核").length;
   const unreadNotificationCount = notifications.filter((notification) => !notification.readAt).length;
 
@@ -131,14 +160,7 @@ function App() {
     setWorkspaceLoading(true);
     const loadSharedWorkspace = async () => {
       try {
-        let shared = await getWorkspace();
-        if (!shared.products.length && !shared.tasks.length && currentUser.role === "管理员") {
-          try {
-            shared = await bootstrapWorkspace(loadWorkspace());
-          } catch {
-            shared = await getWorkspace();
-          }
-        }
+        const shared = await getWorkspace();
         if (!cancelled) setWorkspace(shared);
       } catch (error) {
         if (!cancelled) notify(error instanceof Error ? `${error.message}，已使用本地缓存` : "共享工作区读取失败，已使用本地缓存");
@@ -183,6 +205,17 @@ function App() {
       window.clearInterval(timer);
     };
   }, [currentUser?.id, currentUser?.mustChangePassword]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    if (currentUser.mustChangePassword) {
+      if (page !== "settings") setPage("settings");
+      return;
+    }
+    if (!canAccessPage(currentUser.role, page)) {
+      setPage(firstAccessiblePage(currentUser.role));
+    }
+  }, [currentUser?.role, currentUser?.mustChangePassword, page]);
 
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -237,6 +270,7 @@ function App() {
       setPage("settings");
       return;
     }
+    if (target !== "listings") setListingFocusSku("");
     setPage(target);
     setAccountOpen(false);
     setMobileNav(false);
@@ -271,8 +305,9 @@ function App() {
     } catch {
       // Keep the current workspace snapshot.
     }
+    setNotificationTargetId(notification.entityId);
     setNotificationOpen(false);
-    go(notification.type === "REVIEW_REQUESTED" ? "reviews" : "tasks");
+    go(notificationTargetPage(notification));
   };
 
   const readAllNotifications = async () => {
@@ -285,22 +320,26 @@ function App() {
     }
   };
 
-  const addProduct = async (product: Product) => {
+  const persistNewProduct = async (product: Product): Promise<Product | undefined> => {
     try {
       const saved = await createWorkspaceProduct(product);
       setWorkspace((current) => ({
         ...current,
         products: [saved, ...current.products],
       }));
-      void recordActivity({ type: "SKU_CREATED", entityType: "product", entityId: product.id });
       notify(`SKU ${product.sku} 已保存到共享工作区`);
-      go("products");
+      return saved;
     } catch (error) {
       notify(error instanceof Error ? error.message : "SKU 保存失败");
+      return undefined;
     }
   };
 
-  const updateProduct = async (product: Product) => {
+  const addProduct = async (product: Product) => {
+    if (await persistNewProduct(product)) go("products");
+  };
+
+  const updateProduct = async (product: Product): Promise<Product | undefined> => {
     try {
       const saved = await updateWorkspaceProduct(product);
       setWorkspace((current) => ({
@@ -308,15 +347,32 @@ function App() {
         products: current.products.map((item) => item.id === saved.id ? saved : item),
       }));
       notify(`SKU ${product.sku} 已同步更新`);
+      return saved;
     } catch (error) {
       notify(error instanceof Error ? error.message : "SKU 更新失败");
+      return undefined;
     }
   };
 
-  const removeProduct = async (product: Product) => {
+  const importProducts = async (products: Product[]): Promise<number> => {
+    try {
+      const result = await importWorkspaceProducts(products);
+      setWorkspace((current) => ({
+        ...current,
+        products: [...result.products, ...current.products],
+      }));
+      notify(`已导入 ${result.importedCount} 个公司 SKU`);
+      return result.importedCount;
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "SKU 批量导入失败");
+      throw error;
+    }
+  };
+
+  const removeProduct = async (product: Product): Promise<boolean> => {
     if (workspace.tasks.some((task) => task.productId === product.id)) {
       notify("该商品已有生产任务，不能直接删除");
-      return;
+      return false;
     }
     try {
       await deleteWorkspaceProduct(product.id);
@@ -325,14 +381,36 @@ function App() {
         products: current.products.filter((item) => item.id !== product.id),
       }));
       notify(`SKU ${product.sku} 已删除`);
+      return true;
     } catch (error) {
       notify(error instanceof Error ? error.message : "SKU 删除失败");
+      return false;
     }
   };
 
   const startTaskForProduct = (productId: string) => {
     setCreateProductId(productId);
     go("create");
+  };
+
+  const continueTaskToListing = (task: GenerationTask) => {
+    setListingFocusSku(task.sku);
+    go("listings");
+  };
+
+  const reuseGeneratedPrompt = (image: GeneratedImage) => {
+    if (!currentUser) return;
+    localStorage.setItem(
+      `huacai-studio-draft:${currentUser.id}`,
+      JSON.stringify({
+        prompt: image.prompt,
+        ratio: image.ratio,
+        quality: image.quality,
+        count: 3,
+      }),
+    );
+    notify("已把历史作品提示词载入素材库，可以继续修改后生成");
+    go("assets");
   };
 
   const addTask = async (task: GenerationTask, imageCount = 0) => {
@@ -350,10 +428,6 @@ function App() {
       ),
       tasks: [saved.task, ...current.tasks],
     }));
-    void recordActivity({ type: "TASK_CREATED", entityType: "task", entityId: task.id });
-    if (imageCount) {
-      void recordActivity({ type: "IMAGE_UPLOADED", entityType: "asset", entityId: task.id, quantity: imageCount });
-    }
     notify("任务已保存到共享工作区");
     go("tasks");
   };
@@ -395,7 +469,7 @@ function App() {
 
         <nav>
           <p>生产工作区</p>
-          {navItems.slice(0, 7).filter((item) => canAccessPage(currentUser.role, item.key)).map((item) => (
+          {navItems.slice(0, 8).filter((item) => canAccessPage(currentUser.role, item.key)).map((item) => (
             <button
               key={item.key}
               className={page === item.key ? "active" : ""}
@@ -407,7 +481,7 @@ function App() {
             </button>
           ))}
           <p>资产与管理</p>
-          {navItems.slice(7).filter((item) => canAccessPage(currentUser.role, item.key)).map((item) => (
+          {navItems.slice(8).filter((item) => canAccessPage(currentUser.role, item.key)).map((item) => (
             <button
               key={item.key}
               className={page === item.key ? "active" : ""}
@@ -420,9 +494,9 @@ function App() {
         </nav>
 
         <div className="workspace-card">
-          <span>{workspaceSummary.activeImageJobs ? `${workspaceSummary.activeImageJobs} 个任务生成中` : "TEAM WORKSPACE"}</span>
+          <span>{workspaceSummary.activeImageJobs ? `${workspaceSummary.activeImageJobs} 个任务生成中` : workspaceSummary.statisticsScope === "team" ? "TEAM WORKSPACE" : "MY OUTPUT"}</span>
           <b>美国站生产空间</b>
-          <small>本月已生成 {workspaceSummary.generatedThisMonth} / {workspaceSummary.monthlyQuota} 张</small>
+          <small>{workspaceSummary.statisticsScope === "team" ? "团队" : "我"}本月生图 {workspaceSummary.generatedThisMonth} 张 · Listing {workspaceSummary.listingsGeneratedThisMonth} 条</small>
           <div><i style={{ width: `${Math.min(100, Math.round(workspaceSummary.generatedThisMonth / workspaceSummary.monthlyQuota * 100))}%` }} /></div>
         </div>
         <div className="account-area" onClick={(event) => event.stopPropagation()}>
@@ -437,7 +511,7 @@ function App() {
               <button type="button" className="danger" onClick={() => { setAccountOpen(false); setLogoutConfirm(true); }}><span>↪</span>退出登录</button>
             </div>
           )}
-          <button className="user-chip" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen}>
+          <button ref={accountTriggerRef} className="user-chip" onClick={() => setAccountOpen((open) => !open)} aria-expanded={accountOpen} aria-haspopup="menu">
             <span>{currentUser.name.slice(0, 1)}</span>
             <div><b>{currentUser.name}</b><small>{currentUser.department} · {currentUser.role}</small></div>
             <i>{accountOpen ? "⌃" : "⌄"}</i>
@@ -454,7 +528,7 @@ function App() {
             <b>{titles[page].title}</b>
           </div>
           <div className="top-actions">
-            <button className="icon-button" title="帮助">?</button>
+            <button className="icon-button" title="帮助" aria-label="打开帮助中心" onClick={() => setHelpOpen(true)}>?</button>
             <div className="notification-area" onClick={(event) => event.stopPropagation()}>
               <button className="icon-button notification-button" title="通知" onClick={() => setNotificationOpen((open) => !open)}>
                 ◇
@@ -469,8 +543,13 @@ function App() {
                   <div className="notification-list">
                     {notifications.length ? notifications.map((notification) => (
                       <button className={notification.readAt ? "" : "unread"} key={notification.id} onClick={() => void openNotification(notification)}>
-                        <i>{notification.type === "TASK_ASSIGNED" ? "→" : notification.type === "REVIEW_REQUESTED" ? "✓" : notification.type === "TASK_APPROVED" ? "●" : "!"}</i>
-                        <span><b>{notification.title}</b><small>{notification.message}</small><time>{new Date(notification.createdAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</time></span>
+                        <i>{notificationIcon(notification)}</i>
+                        <span>
+                          <b>{notification.title}</b>
+                          <small>{notification.message}</small>
+                          {notificationMetaLine(notification) && <small className="notification-meta">{notificationMetaLine(notification)}</small>}
+                          <time>{new Date(notification.createdAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} · {notificationActionLabel(notification)}</time>
+                        </span>
                       </button>
                     )) : <div className="notification-empty">暂时没有新通知</div>}
                   </div>
@@ -492,9 +571,6 @@ function App() {
               <h1>{titles[page].title}</h1>
               <p>{titles[page].sub}</p>
             </div>
-            {page === "products" && (
-              <button className="primary-button" onClick={() => go("create")}>＋ 添加商品</button>
-            )}
           </div>
 
           {page === "dashboard" && (
@@ -503,8 +579,10 @@ function App() {
           {page === "products" && canAccessPage(currentUser.role, "products") && (
             <Products
               products={workspace.products}
+              tasks={workspace.tasks}
               addProduct={addProduct}
               updateProduct={updateProduct}
+              importProducts={importProducts}
               removeProduct={removeProduct}
               startTask={startTaskForProduct}
             />
@@ -513,7 +591,8 @@ function App() {
             <CreateTask
               products={workspace.products}
               initialProductId={createProductId}
-              addProduct={addProduct}
+              createProduct={persistNewProduct}
+              updateProduct={updateProduct}
               addTask={addTask}
               notify={notify}
               currentUser={currentUser}
@@ -524,34 +603,67 @@ function App() {
               tasks={workspace.tasks}
               currentUser={currentUser}
               notify={notify}
+              focusTaskId={notificationTargetId}
+              onFocusHandled={() => setNotificationTargetId("")}
+              goToListings={continueTaskToListing}
               onTaskUpdated={(saved) => setWorkspace((current) => ({
                 ...current,
                 tasks: current.tasks.map((item) => item.id === saved.id ? saved : item),
               }))}
             />
           )}
-          {page === "reviews" && canAccessPage(currentUser.role, "reviews") && <Reviews tasks={workspace.tasks} onReview={reviewTask} />}
+          {page === "reviews" && canAccessPage(currentUser.role, "reviews") && (
+            <Reviews
+              tasks={workspace.tasks}
+              currentUser={currentUser}
+              focusTaskId={notificationTargetId}
+              onFocusHandled={() => setNotificationTargetId("")}
+              onReview={reviewTask}
+            />
+          )}
           {page === "performance" && currentUser.role === "管理员" && <PerformancePage />}
-          {page === "listings" && canAccessPage(currentUser.role, "listings") && <ListingsPage products={workspace.products} notify={notify} />}
-          {page === "assets" && <AssetsPage notify={notify} currentUser={currentUser} />}
+          {page === "listings" && canAccessPage(currentUser.role, "listings") && (
+            <ListingsPage
+              products={workspace.products}
+              tasks={workspace.tasks}
+              notify={notify}
+              focusSku={listingFocusSku}
+              onFocusHandled={() => setListingFocusSku("")}
+            />
+          )}
+          {page === "listingHistory" && canAccessPage(currentUser.role, "listingHistory") && (
+            <ListingHistoryPage currentUser={currentUser} notify={notify} onOpenListing={(sku) => { setListingFocusSku(sku); go("listings"); }} />
+          )}
+          {page === "assets" && canAccessPage(currentUser.role, "assets") && (
+            <AssetsPage notify={notify} currentUser={currentUser} onOpenHistory={() => go("assetHistory")} />
+          )}
+          {page === "assetHistory" && canAccessPage(currentUser.role, "assetHistory") && (
+            <GeneratedHistoryPage currentUser={currentUser} notify={notify} onReusePrompt={reuseGeneratedPrompt} />
+          )}
           {page === "settings" && <SettingsPage currentUser={currentUser} notify={notify} onUserUpdated={setCurrentUser} />}
         </section>
       </main>
       {logoutConfirm && (
-        <div className="modal-backdrop" onMouseDown={() => !signingOut && setLogoutConfirm(false)}>
-          <section className="modal logout-dialog" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="logout-icon">↪</div>
-            <span className="eyebrow">SIGN OUT</span>
-            <h3>确认退出花彩工作台？</h3>
-            <p>退出后需要重新输入账号密码才能继续使用，当前未提交的表单内容可能会丢失。</p>
-            <div className="modal-actions">
-              <button className="secondary-button" disabled={signingOut} onClick={() => setLogoutConfirm(false)}>取消</button>
-              <button className="danger-button" disabled={signingOut} onClick={signOut}>{signingOut ? "正在退出…" : "确认退出"}</button>
-            </div>
-          </section>
-        </div>
+        <LogoutDialog
+          currentUser={currentUser}
+          activeImageJobs={workspaceSummary.activeImageJobs}
+          signingOut={signingOut}
+          returnFocusRef={accountTriggerRef}
+          onCancel={() => setLogoutConfirm(false)}
+          onConfirm={signOut}
+        />
       )}
-      {toast && <div className="toast">✓ {toast}</div>}
+      {helpOpen && (
+        <HelpCenterDialog
+          role={currentUser.role}
+          onClose={() => setHelpOpen(false)}
+          onNavigate={(target) => {
+            setHelpOpen(false);
+            go(target);
+          }}
+        />
+      )}
+      {toast && <div className="toast" role="status" aria-live="polite">✓ {toast}</div>}
     </div>
   );
 }
@@ -567,6 +679,13 @@ function Dashboard({
   go: (page: PageKey) => void;
   role: EmployeeAccount["role"];
 }) {
+  const [myStatistics, setMyStatistics] = useState<PersonalStatistics | null>(null);
+  const hasProducts = products.length > 0;
+  const hasTasks = tasks.length > 0;
+  const hasApprovedTask = tasks.some((task) => task.status === "已通过");
+  const hasPendingReview = tasks.some((task) => task.status === "待审核");
+  const canManageProducts = canAccessPage(role, "products");
+  const canCreateTask = canAccessPage(role, "create");
   const stats = [
     { label: "SKU 总数", value: products.length, delta: "当前商品库", tone: "violet" },
     { label: "生成中", value: tasks.filter((task) => task.status === "生成中").length, delta: "当前任务", tone: "lime" },
@@ -580,32 +699,77 @@ function Dashboard({
     ["04", "处理待审核任务", "检查结果并通过或驳回", "reviews"],
   ].filter((item) => canAccessPage(role, item[3] as PageKey));
 
+  useEffect(() => {
+    if (role === "管理员") return;
+    let cancelled = false;
+    getMyStatistics(30).then((result) => {
+      if (!cancelled) setMyStatistics(result);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [role]);
+
   return (
     <>
       <section className="hero">
         <div>
-          <span className="hero-kicker"><i /> Amazon Listing 视觉工作流</span>
-          <h2>从商品原图到<br /><em>合规六图套图。</em></h2>
-          <p>让商品资料、图片生成、合规检查与人工审核在一个工作台流转；AI 生图服务接入后自动执行。</p>
+          <span className="hero-kicker"><i /> {hasProducts ? "Amazon Listing 视觉工作流" : "首次使用 · 公司工作区初始化"}</span>
+          <h2>{hasProducts ? <>从商品原图到<br /><em>合规六图套图。</em></> : <>先把公司商品<br /><em>带进花彩。</em></>}</h2>
+          <p>{hasProducts ? "让商品资料、图片生成、合规检查与人工审核在一个工作台流转；AI 生图服务接入后自动执行。" : canManageProducts ? "导入 Excel/CSV 或新建真实 SKU，随后即可上传商品原图、派发设计任务并进入审核流程。" : "工作区正在初始化。运营或管理员导入公司 SKU 后，你的任务会出现在这里。"}</p>
           <div className="hero-actions">
-            {canAccessPage(role, "create") && <button className="primary-button large" onClick={() => go("create")}>创建六图任务 <span>→</span></button>}
-            {!canAccessPage(role, "create") && canAccessPage(role, "reviews") && <button className="primary-button large" onClick={() => go("reviews")}>处理待审核任务 <span>→</span></button>}
-            {canAccessPage(role, "products") && <button className="secondary-button" onClick={() => go("products")}>查看 SKU 商品库</button>}
+            {!hasProducts && canManageProducts && <button className="primary-button large" onClick={() => go("products")}>导入 / 新建公司 SKU <span>→</span></button>}
+            {hasProducts && canAccessPage(role, "create") && <button className="primary-button large" onClick={() => go("create")}>创建六图任务 <span>→</span></button>}
+            {hasPendingReview && !canAccessPage(role, "create") && canAccessPage(role, "reviews") && <button className="primary-button large" onClick={() => go("reviews")}>处理待审核任务 <span>→</span></button>}
+            {hasProducts && canManageProducts && <button className="secondary-button" onClick={() => go("products")}>查看 SKU 商品库</button>}
+            {!hasProducts && role === "管理员" && <button className="secondary-button" onClick={() => go("settings")}>配置员工账号</button>}
           </div>
         </div>
         <div className="hero-visual">
-          <span className="visual-badge top">主图示例</span>
-          <span className="visual-badge right">白底规范示意</span>
+          <span className="visual-badge top">多品类商品</span>
+          <span className="visual-badge right">电商履约示意</span>
           <div className="product-stage">
-            <div className="headphone">
-              <i />
-              <span />
-              <b />
-            </div>
+            <img className="hero-product-image" src={ecommerceHeroImage} alt="电商商品、包装箱与家居用品组合" />
           </div>
-          <small>AMAZON MAIN · 2000 × 2000</small>
+          <small>ECOMMERCE CATALOG · PRODUCT OPS</small>
         </div>
       </section>
+
+      {role !== "管理员" && (
+        <section className="panel personal-output-panel">
+          <div className="panel-head"><div><span className="eyebrow">MY OUTPUT · LAST 30 DAYS</span><h3>我的产出</h3></div><small>只显示你自己的数据</small></div>
+          <div className="personal-output-grid">
+            <article><small>AI 生图</small><strong>{myStatistics?.imagesGenerated ?? "—"}</strong><span>成功生成张数</span></article>
+            <article><small>AI Listing</small><strong>{myStatistics?.listingsGenerated ?? "—"}</strong><span>成功生成版本</span></article>
+            <article><small>创建任务</small><strong>{myStatistics?.tasksCreated ?? "—"}</strong><span>系统真实记录</span></article>
+            <article><small>完成审核</small><strong>{myStatistics?.reviewsCompleted ?? "—"}</strong><span>通过与驳回</span></article>
+          </div>
+        </section>
+      )}
+
+      {(!hasProducts || !hasTasks || !hasApprovedTask) && (
+        <section className="panel onboarding-panel">
+          <div className="onboarding-head">
+            <div><span className="eyebrow">GETTING STARTED</span><h3>把真实工作流跑通</h3></div>
+            <span>{[hasProducts, hasTasks, hasApprovedTask].filter(Boolean).length} / 3 已完成</span>
+          </div>
+          <div className="onboarding-steps">
+            <article className={hasProducts ? "done" : "current"}>
+              <i>{hasProducts ? "✓" : "1"}</i>
+              <div><b>导入公司 SKU</b><small>维护真实商品、品牌、类目和站点资料。</small></div>
+              {!hasProducts && canManageProducts && <button onClick={() => go("products")}>去导入 →</button>}
+            </article>
+            <article className={hasTasks ? "done" : hasProducts ? "current" : ""}>
+              <i>{hasTasks ? "✓" : "2"}</i>
+              <div><b>建立首个视觉任务</b><small>上传商品原图，选择任务类型并分配负责人。</small></div>
+              {!hasTasks && hasProducts && canCreateTask && <button onClick={() => go("create")}>去创建 →</button>}
+            </article>
+            <article className={hasApprovedTask ? "done" : hasTasks ? "current" : ""}>
+              <i>{hasApprovedTask ? "✓" : "3"}</i>
+              <div><b>完成首次审核</b><small>设计提交作品，审核通过后形成可追踪记录。</small></div>
+              {!hasApprovedTask && hasTasks && canAccessPage(role, "reviews") && <button onClick={() => go("reviews")}>去审核 →</button>}
+            </article>
+          </div>
+        </section>
+      )}
 
       <div className="stat-grid">
         {stats.map((stat) => (
@@ -640,21 +804,29 @@ function Dashboard({
 
 function Products({
   products,
+  tasks,
   addProduct,
   updateProduct,
+  importProducts,
   removeProduct,
   startTask,
 }: {
   products: Product[];
+  tasks: GenerationTask[];
   addProduct: (product: Product) => void;
   updateProduct: (product: Product) => void;
-  removeProduct: (product: Product) => void;
+  importProducts: (products: Product[]) => Promise<number>;
+  removeProduct: (product: Product) => Promise<boolean>;
   startTask: (productId: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<Product | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [listings, setListings] = useState<AmazonListing[]>([]);
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -670,6 +842,20 @@ function Products({
     };
   }, [openMenuId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    getListings()
+      .then((items) => {
+        if (!cancelled) setListings(items);
+      })
+      .catch(() => {
+        if (!cancelled) setListings([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const filtered = useMemo(
     () => products.filter((product) =>
       `${product.sku}${product.name}${product.brand}`.toLowerCase().includes(query.toLowerCase()),
@@ -682,7 +868,7 @@ function Products({
       <div className="toolbar">
         <label className="search"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 SKU、商品名或品牌" /></label>
         <div>
-          <button className="secondary-button">⇧ Excel 导入</button>
+          <button className="secondary-button" onClick={() => setShowImport(true)}>⇧ Excel / CSV 导入</button>
           <button className="primary-button" onClick={() => setShowForm(true)}>＋ 新建 SKU</button>
         </div>
       </div>
@@ -690,11 +876,13 @@ function Products({
         <div className="table-row table-header">
           <span>商品</span><span>站点 / 类目</span><span>素材</span><span>状态</span><span>最后更新</span><span />
         </div>
-        {filtered.map((product) => (
+        {filtered.map((product) => {
+          const readiness = evaluateProductReadiness(product);
+          return (
           <div className="table-row" key={product.id}>
-            <span className="product-cell"><i>{product.name.slice(0, 1)}</i><span><b>{product.name}</b><small>{product.sku} · {product.brand}</small></span></span>
+            <span className="product-cell"><i>{product.name.slice(0, 1)}</i><span><b>{product.name}</b><small>{product.sku} · {product.brand}{product.asin ? ` · ${product.asin}` : ""}</small><ProductReadinessBadge readiness={readiness} /></span></span>
             <span><b>{product.marketplace}</b><small>{product.category}</small></span>
-            <span>{product.imageCount} 张原图</span>
+            <span className={product.imageCount ? "" : "muted-warning"}>{product.imageCount ? `${product.imageCount} 张原图` : "待上传原图"}</span>
             <span><Status value={product.status} /></span>
             <span>{product.updatedAt}</span>
             <span className="product-actions">
@@ -718,17 +906,48 @@ function Products({
                     className="danger"
                     onClick={() => {
                       setOpenMenuId(null);
-                      if (window.confirm(`确定删除 SKU ${product.sku} 吗？`)) removeProduct(product);
+                      setDeleteCandidate(product);
                     }}
                   >删除商品</button>
                 </span>
               )}
             </span>
           </div>
-        ))}
+          );
+        })}
+        {!filtered.length && (
+          <div className="product-list-empty">
+            <span>{products.length ? "⌕" : "◇"}</span>
+            <div><b>{products.length ? "没有匹配的 SKU" : "公司商品库还是空的"}</b><small>{products.length ? "请调整搜索关键词。" : "点击右上角新建 SKU，或使用 Excel / CSV 批量导入公司商品。"}</small></div>
+          </div>
+        )}
       </div>
       {showForm && <ProductModal close={() => setShowForm(false)} submit={(product) => { addProduct(product); setShowForm(false); }} />}
       {editing && <ProductModal product={editing} close={() => setEditing(null)} submit={(product) => { updateProduct(product); setEditing(null); }} />}
+      {showImport && (
+        <ProductImportDialog
+          existingSkus={products.map((product) => product.sku)}
+          onClose={() => setShowImport(false)}
+          onImport={importProducts}
+        />
+      )}
+      {deleteCandidate && (
+        <ProductDeleteDialog
+          product={deleteCandidate}
+          relatedTaskCount={tasks.filter((task) => task.productId === deleteCandidate.id).length}
+          relatedListingCount={listings.filter((listing) => listing.sku.toLowerCase() === deleteCandidate.sku.toLowerCase()).length}
+          deleting={deleting}
+          onCancel={() => !deleting && setDeleteCandidate(null)}
+          onConfirm={async () => {
+            setDeleting(true);
+            try {
+              if (await removeProduct(deleteCandidate)) setDeleteCandidate(null);
+            } finally {
+              setDeleting(false);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -736,6 +955,7 @@ function Products({
 function ProductModal({ product, close, submit }: { product?: Product; close: () => void; submit: (product: Product) => void }) {
   const [form, setForm] = useState({
     sku: product?.sku ?? "",
+    asin: product?.asin ?? "",
     name: product?.name ?? "",
     brand: product?.brand ?? "",
     category: product?.category ?? "Home & Kitchen",
@@ -757,7 +977,10 @@ function ProductModal({ product, close, submit }: { product?: Product; close: ()
     <div className="modal-backdrop" onMouseDown={close}>
       <form className="modal" onSubmit={save} onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-head"><div><span className="eyebrow">{product ? "EDIT PRODUCT" : "NEW PRODUCT"}</span><h3>{product ? "编辑 SKU 商品" : "新建 SKU 商品"}</h3></div><button type="button" onClick={close}>×</button></div>
-        <label>SKU<input required value={form.sku} onChange={(event) => setForm({ ...form, sku: event.target.value })} placeholder="例如 HC-CUP-001" /></label>
+        <div className="form-grid">
+          <label>SKU<input required value={form.sku} onChange={(event) => setForm({ ...form, sku: event.target.value })} placeholder="例如 HC-CUP-001" /></label>
+          <label>ASIN（可选）<input maxLength={10} pattern="[A-Za-z0-9]{10}" title="ASIN 应为 10 位字母或数字" value={form.asin} onChange={(event) => setForm({ ...form, asin: event.target.value.toUpperCase() })} placeholder="例如 B0ABC12345" /></label>
+        </div>
         <label>商品名称<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="请输入中文商品名称" /></label>
         <div className="form-grid">
           <label>品牌<input required value={form.brand} onChange={(event) => setForm({ ...form, brand: event.target.value })} /></label>
@@ -770,11 +993,20 @@ function ProductModal({ product, close, submit }: { product?: Product; close: ()
   );
 }
 
+function ProductReadinessBadge({ readiness }: { readiness: ProductReadiness }) {
+  return (
+    <span className={`product-readiness-badge ${readiness.tone}`}>
+      资料完整度 {readiness.score}% · {readiness.label}
+    </span>
+  );
+}
+
 function CreateTask({
   products,
   initialProductId,
   template,
-  addProduct,
+  createProduct,
+  updateProduct,
   addTask,
   notify,
   currentUser,
@@ -782,7 +1014,8 @@ function CreateTask({
   products: Product[];
   initialProductId?: string;
   template?: InspirationTemplate;
-  addProduct: (product: Product) => void;
+  createProduct: (product: Product) => Promise<Product | undefined>;
+  updateProduct: (product: Product) => Promise<Product | undefined>;
   addTask: (task: GenerationTask, imageCount?: number) => Promise<void>;
   notify: (message: string) => void;
   currentUser: EmployeeAccount;
@@ -802,6 +1035,7 @@ function CreateTask({
   const [images, setImages] = useState<Array<{ file: File; url: string }>>([]);
   const [dragging, setDragging] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [productEditor, setProductEditor] = useState<"new" | Product | null>(null);
 
   useEffect(() => {
     getTeamDirectory()
@@ -815,6 +1049,15 @@ function CreateTask({
       .catch(() => notify("团队成员列表读取失败，任务将保存为待分配"));
   }, []);
   const selected = products.find((product) => product.id === productId);
+  const canManageProducts = currentUser.role === "管理员" || currentUser.role === "运营";
+  const expectedInputCount = expectedTaskInputCount(taskType);
+  const inputCreationMessage = taskInputCreationMessage(taskType, images.length);
+  const selectedReadiness = selected
+    ? evaluateProductReadiness(selected, {
+        referenceImageCount: images.length,
+        minReferenceImages: expectedInputCount,
+      })
+    : null;
 
   const addImages = (incoming: FileList | File[]) => {
     const candidates = Array.from(incoming);
@@ -853,11 +1096,16 @@ function CreateTask({
 
   const create = async () => {
     if (!selected || !images.length || saving) return;
+    const inputMessage = taskInputCreationMessage(taskType, images.length);
+    if (!inputMessage.ready) {
+      notify(inputMessage.description);
+      return;
+    }
     setSaving(true);
     const taskId = `TSK-${Date.now().toString().slice(-8)}`;
     let uploadedAssetIds: string[] = [];
     try {
-      const assets = await uploadTaskImages(taskId, selected.id, images.map(({ file }) => file));
+      const assets = await uploadTaskImages(taskId, selected.id, images.map(({ file }) => file), "input");
       uploadedAssetIds = assets.map((asset) => asset.id);
       await addTask({
         id: taskId,
@@ -896,17 +1144,51 @@ function CreateTask({
           </div>
         )}
         <div className="step-title"><span>01</span><div><h3>选择商品</h3><p>生成参数将继承商品和品牌资料。</p></div></div>
-        {products.length ? (
-          <label className="input-label">SKU 商品
-            <select value={productId} onChange={(event) => setProductId(event.target.value)}>
-              {products.map((product) => <option key={product.id} value={product.id}>{product.sku} · {product.name}</option>)}
-            </select>
-          </label>
-        ) : (
-          <button onClick={() => addProduct({
-            id: `prd-${Date.now()}`, sku: "DEMO-001", name: "示例商品", brand: "HUACAI",
-            category: "Home & Kitchen", marketplace: "美国站", status: "资料待完善", imageCount: 0, updatedAt: "刚刚",
-          })}>创建示例商品</button>
+        <div className="product-picker">
+          {products.length ? (
+            <label className="input-label">SKU 商品
+              <select value={productId} onChange={(event) => setProductId(event.target.value)}>
+                {products.map((product) => <option key={product.id} value={product.id}>{product.sku} · {product.name}</option>)}
+              </select>
+            </label>
+          ) : (
+            <div className="product-picker-empty">
+              <b>公司商品库还是空的</b>
+              <span>{canManageProducts ? "先添加真实 SKU，再创建图片任务。" : "请联系运营或管理员添加公司 SKU。"}</span>
+            </div>
+          )}
+          {canManageProducts && (
+            <div className="product-picker-actions">
+              <button type="button" className="secondary-button" disabled={!selected} onClick={() => selected && setProductEditor(selected)}>编辑当前商品</button>
+              <button type="button" className="primary-button" onClick={() => setProductEditor("new")}>＋ 新增 SKU</button>
+            </div>
+          )}
+        </div>
+        {selected && (
+          <div className="selected-product-meta">
+            <span><b>品牌</b>{selected.brand}</span>
+            <span><b>类目</b>{selected.category}</span>
+            <span><b>站点</b>{selected.marketplace}</span>
+            {selected.asin && <span><b>ASIN</b>{selected.asin}</span>}
+          </div>
+        )}
+        {selectedReadiness && selectedReadiness.issues.length > 0 && (
+          <div className={`product-readiness-alert ${selectedReadiness.tone}`}>
+            <div>
+              <b>商品资料完整度 {selectedReadiness.score}% · {selectedReadiness.label}</b>
+              <p>这些不一定阻止创建任务，但提前补齐能减少运营、美工、审核之间来回确认。</p>
+              <ul>
+                {selectedReadiness.issues.slice(0, 3).map((issue) => (
+                  <li key={issue.key}><strong>{issue.label}</strong><span>{issue.detail}</span></li>
+                ))}
+              </ul>
+            </div>
+            {canManageProducts && (
+              <button type="button" className="secondary-button" onClick={() => selected && setProductEditor(selected)}>
+                补商品资料
+              </button>
+            )}
+          </div>
         )}
         <div className="task-assignment">
           <label className="input-label">负责人
@@ -930,7 +1212,7 @@ function CreateTask({
             </button>
           ))}
         </div>
-        <div className="step-title"><span>03</span><div><h3>商品原图</h3><p>支持 JPG、PNG、WEBP，单张不超过 20MB。</p></div></div>
+        <div className="step-title"><span>03</span><div><h3>商品原图</h3><p>{taskType} 至少需要 {expectedInputCount} 张参考原图；支持 JPG、PNG、WEBP，单张不超过 20MB。</p></div></div>
         <label
           className={`upload-box ${dragging ? "dragging" : ""} ${images.length ? "has-images" : ""}`}
           onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
@@ -971,7 +1253,11 @@ function CreateTask({
             </div>
           </div>
         )}
-        <button className="primary-button submit-task" disabled={!selected || !images.length || saving} onClick={create}>
+        <div className={`task-output-requirement ${inputCreationMessage.ready ? "ready" : ""}`}>
+          <b>{inputCreationMessage.ready ? "✓" : "!"} {inputCreationMessage.title}</b>
+          <small>{inputCreationMessage.description}</small>
+        </div>
+        <button className="primary-button submit-task" disabled={!selected || !inputCreationMessage.ready || saving} onClick={create}>
           {saving ? "正在上传原图…" : images.length ? `保存待生成任务 · ${images.length} 张原图` : "请先添加商品图片"} <span>→</span>
         </button>
       </div>
@@ -984,25 +1270,37 @@ function CreateTask({
         </div>
         <dl>
           <div><dt>SKU</dt><dd>{selected?.sku ?? "—"}</dd></div>
+          <div><dt>ASIN</dt><dd>{selected?.asin ?? "未填写"}</dd></div>
+          <div><dt>资料完整度</dt><dd>{selectedReadiness ? `${selectedReadiness.score}%` : "—"}</dd></div>
           <div><dt>目标站点</dt><dd>{selected?.marketplace ?? "—"}</dd></div>
           <div><dt>任务类型</dt><dd>{taskType}</dd></div>
           <div><dt>负责人</dt><dd>{team.find((member) => member.id === assigneeId)?.name ?? "待分配"}</dd></div>
           <div><dt>截止日期</dt><dd>{dueDate || "未设置"}</dd></div>
           <div><dt>预计输出</dt><dd>{taskType === "Amazon 六图套图" ? "6 张" : "1 张"}</dd></div>
-          <div><dt>商品原图</dt><dd>{images.length ? `${images.length} 张` : "未添加"}</dd></div>
+          <div><dt>商品原图</dt><dd>{images.length ? `${images.length} / ${expectedInputCount} 张` : `未添加 / 需 ${expectedInputCount} 张`}</dd></div>
         </dl>
         <div className="compliance-note"><b>✓ Amazon 合规检查</b><p>生成完成后将检查背景、主体占比、尺寸、文字与水印。</p></div>
       </aside>
+      {productEditor && (
+        <ProductModal
+          product={productEditor === "new" ? undefined : productEditor}
+          close={() => setProductEditor(null)}
+          submit={async (product) => {
+            const saved = productEditor === "new"
+              ? await createProduct(product)
+              : await updateProduct(product);
+            if (!saved) return;
+            setProductId(saved.id);
+            setProductEditor(null);
+          }}
+        />
+      )}
     </section>
   );
 }
 
 function isTaskOverdue(task: GenerationTask) {
-  return Boolean(
-    task.dueAt
-    && task.status !== "已通过"
-    && new Date(task.dueAt).getTime() < Date.now(),
-  );
+  return isWorkflowTaskOverdue(task);
 }
 
 function formatTaskDueDate(dueAt?: string) {
@@ -1013,11 +1311,17 @@ function Tasks({
   tasks,
   currentUser,
   notify,
+  focusTaskId,
+  onFocusHandled,
+  goToListings,
   onTaskUpdated,
 }: {
   tasks: GenerationTask[];
   currentUser: EmployeeAccount;
   notify: (message: string) => void;
+  focusTaskId?: string;
+  onFocusHandled?: () => void;
+  goToListings: (task: GenerationTask) => void;
   onTaskUpdated: (task: GenerationTask) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -1051,12 +1355,28 @@ function Tasks({
     setOutputFiles([]);
   };
 
+  useEffect(() => {
+    if (!focusTaskId) return;
+    const task = tasks.find((item) => item.id === focusTaskId);
+    if (task) {
+      openTask(task);
+    } else {
+      notify("通知对应的任务不存在或已被删除");
+    }
+    onFocusHandled?.();
+  }, [focusTaskId, tasks]);
+
   const submitOutputs = async () => {
     if (!selected || !outputFiles.length || submitting) return;
+    const outputMessage = taskOutputSubmissionMessage(selected.type, outputFiles.length);
+    if (!outputMessage.ready) {
+      notify(outputMessage.description);
+      return;
+    }
     setSubmitting(true);
     let uploadedAssetIds: string[] = [];
     try {
-      const uploaded = await uploadTaskImages(selected.id, selected.productId, outputFiles);
+      const uploaded = await uploadTaskImages(selected.id, selected.productId, outputFiles, "output");
       uploadedAssetIds = uploaded.map((asset) => asset.id);
       const saved = await submitWorkspaceTaskOutputs(selected.id, uploadedAssetIds);
       onTaskUpdated(saved);
@@ -1089,6 +1409,12 @@ function Tasks({
     }
   };
 
+  const selectedStage = selected ? taskWorkflowStage(selected) : null;
+  const selectedAction = selected ? nextTaskAction(selected, currentUser) : null;
+  const selectedListingHandoff = selected ? listingHandoffForTask(selected, currentUser) : null;
+  const selectedExpectedOutputCount = selected ? expectedTaskOutputCount(selected.type) : 0;
+  const selectedOutputMessage = selected ? taskOutputSubmissionMessage(selected.type, outputFiles.length) : null;
+
   return (
     <div className="panel">
       <div className="toolbar">
@@ -1097,11 +1423,11 @@ function Tasks({
           <option>全部</option><option>草稿</option><option>待生成</option><option>生成中</option><option>待审核</option><option>已驳回</option><option>已通过</option>
         </select>
       </div>
-      {filtered.length ? <TaskTable tasks={filtered} onOpen={openTask} /> : <EmptyState title="没有匹配的任务" description="请调整搜索词或状态筛选。" />}
+      {filtered.length ? <TaskTable tasks={filtered} currentUser={currentUser} onOpen={openTask} /> : <EmptyState title="没有匹配的任务" description="请调整搜索词或状态筛选。" />}
       {selected && (
         <div className="modal-backdrop" onMouseDown={closeSelected}>
-          <section className="modal task-detail" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-head"><div><span className="eyebrow">TASK DETAILS</span><h3>{selected.productName}</h3></div><button onClick={closeSelected}>×</button></div>
+          <section className="modal task-detail" role="dialog" aria-modal="true" aria-labelledby="task-detail-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-head"><div><span className="eyebrow">TASK DETAILS</span><h3 id="task-detail-title">{selected.productName}</h3></div><button aria-label="关闭任务详情" onClick={closeSelected}>×</button></div>
             <dl>
               <div><dt>任务编号</dt><dd>{selected.id}</dd></div>
               <div><dt>SKU</dt><dd>{selected.sku}</dd></div>
@@ -1115,6 +1441,16 @@ function Tasks({
               <div><dt>成品数量</dt><dd>{selected.outputCount ?? 0} 张</dd></div>
               <div><dt>最后更新</dt><dd>{selected.updatedAt}</dd></div>
             </dl>
+            {selectedStage && selectedAction && (
+              <div className={`task-next-action ${selectedAction.tone}`}>
+                <span>{selectedStage.step}</span>
+                <div>
+                  <b>{selectedAction.title}</b>
+                  <p>{selectedAction.description}</p>
+                  <small>当前阶段：{selectedStage.title} · {selectedStage.description}</small>
+                </div>
+              </div>
+            )}
             {(currentUser.role === "管理员" || currentUser.role === "运营") && selected.status !== "已通过" && (
               <div className="task-assignment-editor">
                 <div><b>任务调度</b><p>更换负责人或调整交付日期，新负责人会收到站内通知。</p></div>
@@ -1150,11 +1486,32 @@ function Tasks({
                 ))}
               </div>
             ) : null}
+            {selectedListingHandoff && (
+              <div className={`task-listing-handoff ${selectedListingHandoff.tone}`}>
+                <span>A</span>
+                <div>
+                  <b>{selectedListingHandoff.title}</b>
+                  <p>{selectedListingHandoff.description}</p>
+                </div>
+                {selectedListingHandoff.cta && (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => {
+                      closeSelected();
+                      goToListings(selected);
+                    }}
+                  >
+                    {selectedListingHandoff.cta} <span>↗</span>
+                  </button>
+                )}
+              </div>
+            )}
             {(currentUser.role === "管理员" || currentUser.role === "设计")
               && selected.status !== "待审核"
               && selected.status !== "已通过" && (
               <div className="task-submit-output">
-                <div><b>{selected.status === "已驳回" ? "上传修改后的成品" : "提交成品审核"}</b><p>支持 JPG、PNG、WEBP，最多 10 张。提交后自动进入审核中心。</p></div>
+                <div><b>{selected.status === "已驳回" ? "上传修改后的成品" : "提交成品审核"}</b><p>支持 JPG、PNG、WEBP；{selected.type} 至少 {selectedExpectedOutputCount} 张，最多 10 张。提交后自动进入审核中心。</p></div>
                 <label>
                   <input type="file" multiple accept="image/jpeg,image/png,image/webp" onChange={(event) => {
                     const files = [...(event.target.files ?? [])]
@@ -1165,7 +1522,13 @@ function Tasks({
                   }} />
                   <span>{outputFiles.length ? `已选择 ${outputFiles.length} 张成品` : "选择成品图片"}</span>
                 </label>
-                <button className="primary-button" disabled={!outputFiles.length || submitting} onClick={submitOutputs}>
+                {selectedOutputMessage && (
+                  <div className={`task-output-requirement ${selectedOutputMessage.ready ? "ready" : ""}`}>
+                    <b>{selectedOutputMessage.ready ? "✓" : "!"} {selectedOutputMessage.title}</b>
+                    <small>{selectedOutputMessage.description}</small>
+                  </div>
+                )}
+                <button className="primary-button" disabled={!selectedOutputMessage?.ready || submitting} onClick={submitOutputs}>
                   {submitting ? "正在提交…" : selected.status === "已驳回" ? "提交新版本" : "提交审核"} →
                 </button>
               </div>
@@ -1181,23 +1544,51 @@ function TaskTable({
   tasks,
   compact = false,
   onOpen,
+  currentUser,
 }: {
   tasks: GenerationTask[];
   compact?: boolean;
   onOpen?: (task: GenerationTask) => void;
+  currentUser?: Pick<EmployeeAccount, "id" | "role">;
 }) {
+  if (!tasks.length) {
+    return (
+      <div className={`task-table-empty ${compact ? "compact" : ""}`}>
+        <span>▤</span>
+        <div><b>还没有生产任务</b><small>导入公司 SKU 后即可创建第一条视觉任务。</small></div>
+      </div>
+    );
+  }
   return (
     <div className={`task-table ${compact ? "compact" : ""}`}>
       {tasks.map((task) => (
-        <div className="task-row" key={task.id}>
-          <span className="task-icon">{task.type.includes("六图") ? "▦" : task.type.includes("白底") ? "◇" : "◉"}</span>
-          <span><b>{task.productName}</b><small>{task.id} · {task.sku}</small></span>
-          {!compact && <span><b>{task.type}</b><small>负责人：{task.assignedToName || task.owner} · 截止 {formatTaskDueDate(task.dueAt)}</small></span>}
-          <span><Status value={task.status} />{task.status === "生成中" && <div className="progress"><i style={{ width: `${task.progress}%` }} /></div>}</span>
-          <span className={`task-time ${isTaskOverdue(task) ? "overdue-text" : ""}`}>{isTaskOverdue(task) ? "已逾期" : task.updatedAt}</span>
-          <button onClick={() => onOpen?.(task)} aria-label={`查看任务 ${task.id}`}>→</button>
-        </div>
+        <TaskTableRow task={task} compact={compact} currentUser={currentUser} onOpen={onOpen} key={task.id} />
       ))}
+    </div>
+  );
+}
+
+function TaskTableRow({
+  task,
+  compact,
+  currentUser,
+  onOpen,
+}: {
+  task: GenerationTask;
+  compact: boolean;
+  currentUser?: Pick<EmployeeAccount, "id" | "role">;
+  onOpen?: (task: GenerationTask) => void;
+}) {
+  const action = currentUser ? nextTaskAction(task, currentUser) : null;
+  return (
+    <div className="task-row">
+      <span className="task-icon">{task.type.includes("六图") ? "▦" : task.type.includes("白底") ? "◇" : "◉"}</span>
+      <span><b>{task.productName}</b><small>{task.id} · {task.sku}</small></span>
+      {!compact && <span><b>{task.type}</b><small>负责人：{task.assignedToName || task.owner} · 截止 {formatTaskDueDate(task.dueAt)}</small></span>}
+      <span><Status value={task.status} />{task.status === "生成中" && <div className="progress"><i style={{ width: `${task.progress}%` }} /></div>}</span>
+      {action && !compact && <span className={`task-row-action ${action.tone}`}>{action.title}</span>}
+      <span className={`task-time ${isTaskOverdue(task) ? "overdue-text" : ""}`}>{isTaskOverdue(task) ? "已逾期" : task.updatedAt}</span>
+      <button onClick={() => onOpen?.(task)} aria-label={`查看任务 ${task.id}`}>→</button>
     </div>
   );
 }
@@ -1235,14 +1626,31 @@ function ReviewPreview({ task }: { task: GenerationTask }) {
 
 function Reviews({
   tasks,
+  currentUser,
+  focusTaskId,
+  onFocusHandled,
   onReview,
 }: {
   tasks: GenerationTask[];
+  currentUser: EmployeeAccount;
+  focusTaskId?: string;
+  onFocusHandled?: () => void;
   onReview: (task: GenerationTask, approved: boolean, comment: string) => Promise<void>;
 }) {
   const pending = tasks.filter((task) => task.status === "待审核");
   const [comments, setComments] = useState<Record<string, string>>({});
   const [reviewingId, setReviewingId] = useState("");
+  const [highlightedId, setHighlightedId] = useState("");
+  useEffect(() => {
+    if (!focusTaskId) return;
+    const task = pending.find((item) => item.id === focusTaskId);
+    if (task) {
+      setHighlightedId(task.id);
+      window.requestAnimationFrame(() => document.getElementById(`review-task-${task.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+      window.setTimeout(() => setHighlightedId(""), 2600);
+    }
+    onFocusHandled?.();
+  }, [focusTaskId, tasks]);
   const submitReview = async (task: GenerationTask, approved: boolean) => {
     const comment = comments[task.id]?.trim() ?? "";
     if (!approved && !comment) return;
@@ -1261,29 +1669,80 @@ function Reviews({
   return pending.length ? (
     <div className="review-grid">
       {pending.map((task) => (
-        <article className="panel review-card" key={task.id}>
-          <ReviewPreview task={task} />
-          <div>
-            <span className="eyebrow">{task.sku}</span>
-            <h3>{task.productName}</h3>
-            <p>{task.type} · {task.assignedToName || task.owner} 提交 · V{task.version ?? 1} · 截止 {formatTaskDueDate(task.dueAt)}</p>
-            <label className="review-comment">审核意见
-              <textarea
-                value={comments[task.id] ?? ""}
-                onChange={(event) => setComments((current) => ({ ...current, [task.id]: event.target.value }))}
-                maxLength={1000}
-                placeholder="通过时可选填；驳回时请明确说明需要修改的位置和要求"
-              />
-            </label>
-            <div className="review-actions">
-              <button className="secondary-button" disabled={reviewingId === task.id || !(comments[task.id]?.trim())} onClick={() => void submitReview(task, false)}>驳回修改</button>
-              <button className="primary-button" disabled={reviewingId === task.id} onClick={() => void submitReview(task, true)}>{reviewingId === task.id ? "提交中…" : "通过审核"}</button>
-            </div>
-          </div>
-        </article>
+        <ReviewCard
+          key={task.id}
+          task={task}
+          currentUser={currentUser}
+          highlighted={highlightedId === task.id}
+          comment={comments[task.id] ?? ""}
+          reviewing={reviewingId === task.id}
+          onCommentChange={(comment) => setComments((current) => ({ ...current, [task.id]: comment }))}
+          onSubmitReview={submitReview}
+        />
       ))}
     </div>
   ) : <EmptyState title="当前没有待审核任务" description="图片生成完成并提交审核后，任务会出现在这里。" />;
+}
+
+function ReviewCard({
+  task,
+  currentUser,
+  highlighted,
+  comment,
+  reviewing,
+  onCommentChange,
+  onSubmitReview,
+}: {
+  task: GenerationTask;
+  currentUser: EmployeeAccount;
+  highlighted: boolean;
+  comment: string;
+  reviewing: boolean;
+  onCommentChange: (comment: string) => void;
+  onSubmitReview: (task: GenerationTask, approved: boolean) => void;
+}) {
+  const action = nextTaskAction(task, currentUser);
+  const reviewOutputCount = Math.max(task.outputCount ?? 0, task.outputAssetIds?.length ?? 0);
+  const reviewOutputMessage = taskOutputSubmissionMessage(task.type, reviewOutputCount);
+  const rejectionMessage = reviewRejectionCommentMessage(comment);
+  return (
+    <article id={`review-task-${task.id}`} className={`panel review-card ${highlighted ? "notification-focus" : ""}`}>
+      <ReviewPreview task={task} />
+      <div>
+        <span className="eyebrow">{task.sku}</span>
+        <h3>{task.productName}</h3>
+        <p>{task.type} · {task.assignedToName || task.owner} 提交 · V{task.version ?? 1} · 截止 {formatTaskDueDate(task.dueAt)}</p>
+        <div className={`review-next-action ${action.tone}`}>
+          <b>{action.title}</b>
+          <small>{action.description}</small>
+        </div>
+        {!reviewOutputMessage.ready && (
+          <div className="task-output-requirement">
+            <b>! 暂不能通过审核：{reviewOutputMessage.title}</b>
+            <small>{reviewOutputMessage.description}</small>
+          </div>
+        )}
+        <label className="review-comment">审核意见
+          <textarea
+            value={comment}
+            onChange={(event) => onCommentChange(event.target.value)}
+            maxLength={1000}
+            placeholder="通过时可选填；驳回时请明确说明需要修改的位置和要求"
+          />
+        </label>
+        {comment.trim() && (
+          <div className={`review-comment-quality ${rejectionMessage.ready ? "ready" : ""}`}>
+            <b>{rejectionMessage.ready ? "✓" : "!"} {rejectionMessage.title}</b>
+            <small>{rejectionMessage.description}</small>
+          </div>
+        )}
+        <div className="review-actions">
+          <button className="secondary-button" disabled={reviewing || !rejectionMessage.ready} onClick={() => onSubmitReview(task, false)}>驳回修改</button>
+          <button className="primary-button" disabled={reviewing || !reviewOutputMessage.ready} onClick={() => onSubmitReview(task, true)}>{reviewing ? "提交中…" : "通过审核"}</button>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 function Placeholder({ kind }: { kind: "assets" | "settings" }) {

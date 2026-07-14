@@ -1,184 +1,467 @@
-import { useEffect, useState } from "react";
-import { createListing, getAmazonStatus, getListings, refreshListingStatus, submitListing, updateListing, validateListing } from "../lib/api";
-import type { AmazonListing, Product } from "../types/domain";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ApiError,
+  createListing,
+  generateListingCopy,
+  getListings,
+  updateListing,
+  type ListingGenerationResult,
+} from "../lib/api";
+import ListingCreateDialog, { listingMarketplaces, type ListingMarketplaceOption } from "../components/ListingCreateDialog";
+import { buildListingCreateInputFromProduct } from "../lib/listingDraft";
+import {
+  buildListingComplianceReport,
+  extractAmazonAsin,
+  listingClipboardText,
+} from "../lib/listingGeneration";
+import type { AmazonListing, GenerationTask, Product } from "../types/domain";
 
-export default function ListingsPage({ products, notify }: { products: Product[]; notify: (message: string) => void }) {
+function fiveBullets(points: string[]) {
+  return Array.from({ length: 5 }, (_, index) => points[index] ?? "");
+}
+
+async function writeClipboard(value: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {
+      // HTTP 内网页面可能没有 Clipboard API 权限，继续使用兼容方案。
+    }
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("浏览器未授予剪贴板权限");
+}
+
+export default function ListingsPage({
+  products,
+  tasks: _tasks,
+  notify,
+  focusSku = "",
+  onFocusHandled,
+}: {
+  products: Product[];
+  tasks: GenerationTask[];
+  notify: (message: string) => void;
+  focusSku?: string;
+  onFocusHandled?: () => void;
+}) {
   const [listings, setListings] = useState<AmazonListing[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState<AmazonListing | null>(null);
-  const [configured, setConfigured] = useState(false);
-  const [connectorReady, setConnectorReady] = useState(false);
-  const [amazonMode, setAmazonMode] = useState("sandbox");
+  const [listingsLoaded, setListingsLoaded] = useState(false);
+  const [competitorUrl, setCompetitorUrl] = useState("");
+  const [generation, setGeneration] = useState<ListingGenerationResult | null>(null);
+  const [generationError, setGenerationError] = useState("");
+  const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [creatingListing, setCreatingListing] = useState(false);
+  const focusRequestRef = useRef("");
+
+  const choose = (listing: AmazonListing) => {
+    setSelectedId(listing.id);
+    setDraft(structuredClone(listing));
+    setCompetitorUrl(listing.competitorUrl ?? "");
+    setGeneration(null);
+    setGenerationError("");
+    setDirty(false);
+  };
 
   const load = async () => {
     try {
-      const [items, status] = await Promise.all([getListings(), getAmazonStatus()]);
+      const items = await getListings();
       setListings(items);
-      setConfigured(status.configured);
-      setConnectorReady(status.connectorReady);
-      setAmazonMode(status.mode);
       const current = items.find((item) => item.id === selectedId) ?? items[0];
-      if (current) {
-        setSelectedId(current.id);
-        setDraft(structuredClone(current));
+      if (current) choose(current);
+      else {
+        setSelectedId("");
+        setDraft(null);
       }
     } catch (error) {
       setListings([]);
       setDraft(null);
       notify(error instanceof Error ? error.message : "Listing 加载失败");
+    } finally {
+      setListingsLoaded(true);
     }
   };
 
   useEffect(() => { void load(); }, []);
 
-  const choose = (listing: AmazonListing) => {
-    setSelectedId(listing.id);
-    setDraft(structuredClone(listing));
+  const useExistingListingFromConflict = (error: unknown) => {
+    const listing = error instanceof ApiError ? error.data.listing as AmazonListing | undefined : undefined;
+    if (error instanceof ApiError && error.code === "LISTING_ALREADY_EXISTS" && listing?.id) {
+      setListings((current) => current.some((item) => item.id === listing.id)
+        ? current.map((item) => item.id === listing.id ? listing : item)
+        : [listing, ...current]);
+      choose(listing);
+      notify(`${error.message}，已切换到现有草稿`);
+      return true;
+    }
+    return false;
   };
 
-  const add = async () => {
-    const product = products[0];
-    const listing = await createListing({
-      sku: product?.sku ?? `NEW-${Date.now()}`,
-      title: product?.name ?? "",
-      brand: product?.brand ?? "",
-      marketplaceId: "ATVPDKIKX0DER",
-      marketplaceName: "美国站",
-      productType: product?.category === "Electronics" ? "HEADPHONES" : "",
-      currency: "USD",
-      bulletPoints: ["", "", "", "", ""],
-      ownerId: "emp-zhang",
-    });
-    setListings((current) => [listing, ...current]);
-    choose(listing);
-    notify("Listing 草稿已创建");
+  const openCreateDialog = () => {
+    if (!products.length) {
+      notify("请先在 SKU 商品库创建商品，再新建 Listing");
+      return;
+    }
+    setCreateDialogOpen(true);
+  };
+
+  const add = async (product: Product, marketplace: ListingMarketplaceOption) => {
+    setCreatingListing(true);
+    try {
+      const listing = await createListing(buildListingCreateInputFromProduct(product, marketplace));
+      setListings((current) => [listing, ...current]);
+      choose(listing);
+      setCreateDialogOpen(false);
+      notify(`${product.sku} 的 ${marketplace.name} Listing 草稿已创建`);
+    } catch (error) {
+      if (!useExistingListingFromConflict(error)) notify(error instanceof Error ? error.message : "Listing 创建失败");
+      setCreateDialogOpen(false);
+    } finally {
+      setCreatingListing(false);
+    }
+  };
+
+  useEffect(() => {
+    const normalizedSku = focusSku.trim().toUpperCase();
+    if (!normalizedSku) {
+      focusRequestRef.current = "";
+      return;
+    }
+    if (!listingsLoaded || focusRequestRef.current === normalizedSku) return;
+    focusRequestRef.current = normalizedSku;
+
+    const existing = listings.find((listing) => listing.sku.trim().toUpperCase() === normalizedSku);
+    if (existing) {
+      choose(existing);
+      notify(`已定位 ${existing.sku} 的 Listing 草稿`);
+      onFocusHandled?.();
+      return;
+    }
+
+    const product = products.find((item) => item.sku.trim().toUpperCase() === normalizedSku);
+    if (!product) {
+      notify(`没有找到 SKU ${focusSku} 的商品资料`);
+      onFocusHandled?.();
+      return;
+    }
+
+    const marketplace = listingMarketplaces.find((item) => item.name === product.marketplace) ?? listingMarketplaces[0];
+    setCreatingListing(true);
+    createListing(buildListingCreateInputFromProduct(product, marketplace))
+      .then((listing) => {
+        setListings((current) => [listing, ...current]);
+        choose(listing);
+        notify(`${product.sku} 尚无 Listing，已自动创建草稿`);
+      })
+      .catch((error) => {
+        if (!useExistingListingFromConflict(error)) notify(error instanceof Error ? error.message : "Listing 自动创建失败");
+      })
+      .finally(() => {
+        setCreatingListing(false);
+        onFocusHandled?.();
+      });
+  }, [focusSku, listingsLoaded, listings, products]);
+
+  const change = <K extends keyof AmazonListing>(key: K, value: AmazonListing[K]) => {
+    setDraft((current) => current ? { ...current, [key]: value } : current);
+    setDirty(true);
+  };
+
+  const competitorAsin = useMemo(() => extractAmazonAsin(competitorUrl), [competitorUrl]);
+  const compliance = useMemo(
+    () => draft ? buildListingComplianceReport(draft, generation?.copy.assumptions ?? []) : null,
+    [draft, generation],
+  );
+  const errors = compliance?.issues.filter((issue) => issue.severity === "error") ?? [];
+  const warnings = compliance?.issues.filter((issue) => issue.severity === "warning") ?? [];
+  const matchedProduct = draft
+    ? products.find((product) => product.sku.trim().toUpperCase() === draft.sku.trim().toUpperCase())
+    : undefined;
+
+  const generate = async () => {
+    if (!draft || generating) return;
+    if (!competitorAsin) {
+      setGenerationError("请粘贴包含 /dp/ASIN 的完整 Amazon 商品链接");
+      return;
+    }
+    setGenerating(true);
+    setGenerationError("");
+    try {
+      const result = await generateListingCopy({ listingId: draft.id, competitorUrl: competitorUrl.trim() });
+      const next: AmazonListing = {
+        ...draft,
+        title: result.copy.title,
+        bulletPoints: fiveBullets(result.copy.bulletPoints),
+        description: result.copy.description,
+        searchTerms: result.copy.searchTerms,
+        competitorUrl: result.competitor.canonicalUrl,
+        competitorAsin: result.competitor.asin,
+        aiGeneratedAt: new Date().toISOString(),
+        latestGenerationId: result.generationId,
+      };
+      setDraft(next);
+      setCompetitorUrl(result.competitor.canonicalUrl);
+      setGeneration(result);
+      setDirty(true);
+      notify(`已读取竞品 ASIN ${result.competitor.asin} 并生成 Listing，请检查后保存`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "AI Listing 生成失败";
+      setGenerationError(message);
+      notify(message);
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const save = async () => {
-    if (!draft) return;
+    if (!draft || saving) return;
     setSaving(true);
     try {
-      const result = await updateListing(draft);
+      const result = await updateListing({
+        ...draft,
+        competitorUrl: competitorUrl.trim() || undefined,
+        competitorAsin: competitorAsin || draft.competitorAsin,
+      });
       setDraft(result);
       setListings((current) => current.map((item) => item.id === result.id ? result : item));
-      notify("Listing 已保存");
+      setDirty(false);
+      notify("AI Listing 已保存到草稿");
+    } catch (error) {
+      if (!useExistingListingFromConflict(error)) notify(error instanceof Error ? error.message : "Listing 保存失败");
     } finally {
       setSaving(false);
     }
   };
 
-  const validate = async () => {
-    if (!draft) return;
-    await save();
-    const result = await validateListing(draft.id);
-    setDraft(result.listing);
-    setListings((current) => current.map((item) => item.id === result.listing.id ? result.listing : item));
-    notify(
-      result.listing.issues.length
-        ? `发现 ${result.listing.issues.length} 个待完善项`
-        : result.amazonSchemaValidation === "ready"
-          ? "本地基础检查通过；Amazon 发布连接器尚未启用"
-          : "本地基础检查通过；需由管理员连接 Amazon SP-API 后才能官方校验",
-    );
-  };
-
-  const submit = async () => {
-    if (!draft) return;
+  const copy = async (label: string, value: string) => {
     try {
-      const result = await submitListing(draft.id);
-      setDraft(result.listing);
-      setListings((current) => current.map((item) => item.id === result.listing.id ? result.listing : item));
-      notify(result.amazon.status === "ACCEPTED" ? "Amazon 已接受提交，正在处理" : "Listing 已发送到 Amazon");
+      await writeClipboard(value);
+      notify(`${label}已复制`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Amazon 提交失败");
+      notify(error instanceof Error ? error.message : "复制失败");
     }
-  };
-
-  const refreshAmazonStatus = async () => {
-    if (!draft || refreshing) return;
-    setRefreshing(true);
-    try {
-      const result = await refreshListingStatus(draft.id);
-      setDraft(result.listing);
-      setListings((current) => current.map((item) => item.id === result.listing.id ? result.listing : item));
-      notify(result.listing.status === "已发布" ? "Amazon Listing 已确认发布" : "已同步 Amazon 最新处理状态");
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "Amazon 状态查询失败");
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const change = <K extends keyof AmazonListing>(key: K, value: AmazonListing[K]) => {
-    setDraft((current) => current ? { ...current, [key]: value } : current);
   };
 
   return (
-    <section className="listing-layout">
-      <aside className="panel listing-sidebar">
-        <div className="listing-side-head"><div><span className="eyebrow">LISTING QUEUE</span><h3>商品 Listing</h3></div><button onClick={add}>＋</button></div>
-        {listings.map((listing) => (
-          <button className={listing.id === selectedId ? "active" : ""} onClick={() => choose(listing)} key={listing.id}>
-            <span><b>{listing.sku}</b><small>{listing.marketplaceName} · {listing.productType || "未选类目"}</small></span>
-            <em className={`listing-status status-${listing.status}`}>{listing.status}</em>
-          </button>
-        ))}
-      </aside>
-      {draft ? (
-        <div className="panel listing-editor">
-          <div className="listing-editor-head">
-            <div><span className="eyebrow">AMAZON LISTING EDITOR</span><h2>{draft.sku}</h2><p>当前可编辑和检查 Listing；完成卖家平台授权后，才可以由花彩直接提交到 Amazon。</p></div>
-            <span className={`connection ${connectorReady ? "online" : ""}`}>
-              {connectorReady ? `● Amazon ${amazonMode === "sandbox" ? "沙盒" : "正式店铺"}已连接` : configured ? "◐ 授权资料已配置 · 发布待启用" : "○ Amazon 尚未授权"}
-            </span>
+    <>
+      <section className="listing-layout listing-simple-layout">
+        <aside className="panel listing-sidebar listing-simple-sidebar">
+          <div className="listing-side-head">
+            <div><span className="eyebrow">LISTING DRAFTS</span><h3>Listing 草稿</h3></div>
+            <button type="button" aria-label="新建 Listing" onClick={openCreateDialog}>＋</button>
           </div>
-          {!connectorReady && (
-            <div className="amazon-authorization-note">
-              <span>↗</span>
-              <div>
-                <b>{configured ? "卖家授权资料已保存，但发布连接器尚未启用" : "什么是连接 Amazon？"}</b>
-                <p>{configured
-                  ? "目前仍可保存草稿和执行本地检查；启用 SP-API 发布连接器后才能直接上架。"
-                  : "由管理员在 Amazon Seller Central 授权花彩访问指定店铺。授权后，运营才能在这里提交 Listing、查询处理结果；普通员工不需要提供亚马逊密码。"}</p>
-              </div>
-            </div>
-          )}
-          <div className="listing-grid">
-            <label>目标站点<select value={draft.marketplaceId} onChange={(event) => change("marketplaceId", event.target.value)}><option value="ATVPDKIKX0DER">美国站</option><option value="A1F83G8C2ARO7P">英国站</option><option value="A1PA6795UKMFR9">德国站</option><option value="A1VC38T7YXB528">日本站</option></select></label>
-            <label>Product Type<input value={draft.productType} onChange={(event) => change("productType", event.target.value.toUpperCase())} placeholder="例如 HEADPHONES" /></label>
-            <label>品牌<input value={draft.brand} onChange={(event) => change("brand", event.target.value)} /></label>
-            <label>SKU<input value={draft.sku} onChange={(event) => change("sku", event.target.value)} /></label>
-          </div>
-          <label className="listing-field">英文标题 <span>{draft.title.length}/200</span><input value={draft.title} maxLength={200} onChange={(event) => change("title", event.target.value)} /></label>
-          <div className="bullet-fields">
-            <b>五点卖点</b>
-            {draft.bulletPoints.map((point, index) => (
-              <label key={index}><span>{index + 1}</span><textarea value={point} maxLength={500} onChange={(event) => {
-                const next = [...draft.bulletPoints]; next[index] = event.target.value; change("bulletPoints", next);
-              }} /></label>
-            ))}
-          </div>
-          <label className="listing-field">商品描述<textarea value={draft.description} onChange={(event) => change("description", event.target.value)} /></label>
-          <label className="listing-field">Search Terms<input value={draft.searchTerms} onChange={(event) => change("searchTerms", event.target.value)} /></label>
-          <div className="listing-grid">
-            <label>售价<input type="number" min="0" step="0.01" value={draft.price} onChange={(event) => change("price", Number(event.target.value))} /></label>
-            <label>库存<input type="number" min="0" value={draft.quantity} onChange={(event) => change("quantity", Number(event.target.value))} /></label>
-          </div>
-          {draft.issues.length > 0 && <div className="listing-issues"><b>提交前需要处理</b>{draft.issues.map((issue) => <p key={issue}>• {issue}</p>)}</div>}
-          <div className="listing-actions">
-            <button className="secondary-button" onClick={save} disabled={saving}>{saving ? "保存中…" : "保存草稿"}</button>
-            <button className="secondary-button" onClick={validate}>本地检查 Listing</button>
-            {(draft.status === "提交中" || draft.status === "已发布") && (
-              <button className="secondary-button" disabled={refreshing} onClick={refreshAmazonStatus}>{refreshing ? "同步中…" : "查询 Amazon 状态"}</button>
-            )}
-            <button className="primary-button" onClick={submit} disabled={!connectorReady || draft.status !== "可提交"}>
-              {draft.status === "提交中" ? "Amazon 处理中" : draft.status === "已发布" ? "Amazon 已发布" : connectorReady ? `提交到 Amazon ${amazonMode === "sandbox" ? "沙盒" : "正式店铺"}` : configured ? "发布连接器待启用" : "Amazon 尚未授权"} <span>↗</span>
+          <p className="listing-side-tip">选择一个公司 SKU，再用竞品链接生成文案。</p>
+          {listings.map((listing) => (
+            <button className={listing.id === selectedId ? "active" : ""} onClick={() => choose(listing)} key={listing.id}>
+              <span>
+                <b>{listing.sku}</b>
+                <small>{listing.marketplaceName} · {listing.productType || "未选类目"}</small>
+              </span>
+              <em className={`listing-status ${listing.aiGeneratedAt ? "ai-ready" : "ai-pending"}`}>
+                {listing.aiGeneratedAt ? "AI 已生成" : "待生成"}
+              </em>
             </button>
+          ))}
+        </aside>
+
+        {draft ? (
+          <main className="panel listing-ai-page">
+            <header className="listing-ai-header">
+              <div>
+                <span className="eyebrow">AMAZON AI LISTING</span>
+                <h2>{draft.sku}</h2>
+                <p>粘贴一个竞品链接，自动提取 ASIN，并生成可编辑的标题、五点、描述与 Search Terms。</p>
+                <small className="listing-ai-ownership">草稿创建人：{draft.ownerName || "历史账号"} · 最后编辑：{draft.lastEditedByName || draft.ownerName || "暂无"}</small>
+              </div>
+              <div className="listing-ai-product-tags">
+                <span className="listing-ai-mode-tag">竞品优先</span>
+                <span>{draft.marketplaceName}</span>
+                <span>{draft.productType || matchedProduct?.category || "类目待确认"}</span>
+                <span>{draft.brand || matchedProduct?.brand || "品牌待确认"}</span>
+              </div>
+            </header>
+
+            <section className="listing-ai-source-card">
+              <div className="listing-ai-step-title">
+                <i>01</i>
+                <div><b>输入竞品链接</b><small>竞品决定商品类型和事实；SKU 仅提供目标品牌与保存位置</small></div>
+              </div>
+              <div className="listing-ai-url-row">
+                <label>
+                  <span>Amazon 竞品 URL</span>
+                  <input
+                    value={competitorUrl}
+                    onChange={(event) => {
+                      setCompetitorUrl(event.target.value);
+                      setGenerationError("");
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void generate();
+                      }
+                    }}
+                    placeholder="https://www.amazon.com/dp/B0XXXXXXXX"
+                    aria-label="Amazon 竞品链接"
+                  />
+                </label>
+                <button type="button" className="primary-button listing-ai-generate" disabled={generating || !competitorAsin} onClick={() => void generate()}>
+                  {generating ? "正在读取竞品并生成…" : "AI 生成 Listing"} <span>↗</span>
+                </button>
+              </div>
+              <div className={`listing-ai-asin ${competitorAsin ? "detected" : ""}`}>
+                <span>{competitorAsin ? "✓" : "○"}</span>
+                <div>
+                  <b>{competitorAsin ? `已识别 ASIN：${competitorAsin}` : "等待识别 ASIN"}</b>
+                  <small>{competitorAsin ? "生成时会读取该商品页的公开标题、卖点和描述，不保存网页原文。" : "请使用 Amazon 商品详情页完整链接，系统不会把竞品 ASIN 写成你自己的 ASIN。"}</small>
+                </div>
+              </div>
+              {generationError && <div className="listing-ai-error">{generationError}</div>}
+              {generation?.competitor.extractedTitle && (
+                <div className="listing-ai-source-result">
+                  <span>竞品读取成功</span>
+                  <b>{generation.competitor.extractedTitle}</b>
+                  <small>{generation.competitor.marketplace} · ASIN {generation.competitor.asin}{generation.competitor.extractedBrand ? ` · 原品牌 ${generation.competitor.extractedBrand}` : ""} · 模型 {generation.model}</small>
+                </div>
+              )}
+            </section>
+
+            <div className="listing-ai-workspace">
+              <section className="listing-ai-copy-editor">
+                <div className="listing-ai-section-head">
+                  <div className="listing-ai-step-title"><i>02</i><div><b>AI 文案</b><small>生成后仍可人工修改</small></div></div>
+                  <span className={dirty ? "unsaved" : "saved"}>{dirty ? "● 有未保存修改" : "✓ 草稿已保存"}</span>
+                </div>
+
+                <article className="listing-ai-field-card">
+                  <div className="listing-ai-field-head">
+                    <label htmlFor="listing-title">商品标题</label>
+                    <div><span>{draft.title.length}/{compliance?.titleLimit ?? 75}</span><button type="button" onClick={() => void copy("标题", draft.title)}>复制</button></div>
+                  </div>
+                  <textarea id="listing-title" className="listing-ai-title-input" value={draft.title} rows={2} onChange={(event) => change("title", event.target.value)} />
+                  <small>已预适配 Amazon 2026 年 7 月 27 日标题新规；非媒体类目不超过 75 字符。</small>
+                </article>
+
+                <article className="listing-ai-field-card">
+                  <div className="listing-ai-field-head"><label>五点卖点</label><span>5 条 · 每条最多 255 字符</span></div>
+                  <div className="listing-ai-bullets">
+                    {fiveBullets(draft.bulletPoints).map((point, index) => (
+                      <label key={index}>
+                        <i>{index + 1}</i>
+                        <textarea
+                          value={point}
+                          maxLength={255}
+                          rows={3}
+                          aria-label={`卖点 ${index + 1}`}
+                          onChange={(event) => {
+                            const next = fiveBullets(draft.bulletPoints);
+                            next[index] = event.target.value;
+                            change("bulletPoints", next);
+                          }}
+                        />
+                        <button type="button" onClick={() => void copy(`卖点 ${index + 1}`, point)}>复制</button>
+                      </label>
+                    ))}
+                  </div>
+                </article>
+
+                <article className="listing-ai-field-card">
+                  <div className="listing-ai-field-head">
+                    <label htmlFor="listing-description">商品描述</label>
+                    <div><span>{draft.description.length}/2000</span><button type="button" onClick={() => void copy("商品描述", draft.description)}>复制</button></div>
+                  </div>
+                  <textarea id="listing-description" value={draft.description} rows={7} onChange={(event) => change("description", event.target.value)} />
+                </article>
+
+                <article className="listing-ai-field-card">
+                  <div className="listing-ai-field-head">
+                    <label htmlFor="listing-search-terms">Search Terms</label>
+                    <button type="button" onClick={() => void copy("Search Terms", draft.searchTerms)}>复制</button>
+                  </div>
+                  <textarea id="listing-search-terms" value={draft.searchTerms} rows={3} onChange={(event) => change("searchTerms", event.target.value)} />
+                  <small>使用空格分隔，系统按 250 UTF-8 字节检查。</small>
+                </article>
+              </section>
+
+              <aside className="listing-ai-compliance">
+                <div className="listing-ai-step-title"><i>03</i><div><b>Amazon 规则检查</b><small>编辑时实时更新</small></div></div>
+                <div className={`listing-ai-rule-summary ${compliance?.compliant ? "passed" : "failed"}`}>
+                  <strong>{compliance?.compliant ? "规则检查通过" : `${errors.length} 个问题待处理`}</strong>
+                  <span>{warnings.length ? `另有 ${warnings.length} 条提醒` : "没有额外提醒"}</span>
+                </div>
+
+                <div className="listing-ai-rule-basics">
+                  <span><i>✓</i> 标题长度与禁用字符</span>
+                  <span><i>✓</i> 实义词不过度重复</span>
+                  <span><i>✓</i> 五点数量、长度与 emoji</span>
+                  <span><i>✓</i> 无促销、退款保证和外链</span>
+                  <span><i>✓</i> Search Terms 字节限制</span>
+                </div>
+
+                {(compliance?.issues.length ?? 0) > 0 && (
+                  <div className="listing-ai-issues">
+                    {compliance?.issues.map((issue, index) => (
+                      <div className={issue.severity} key={`${issue.code}-${issue.index ?? index}`}>
+                        <i>{issue.severity === "error" ? "!" : "?"}</i>
+                        <span><b>{issue.severity === "error" ? "需要修改" : "请确认"}</b><small>{issue.message}</small></span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {generation && (generation.copy.competitorInsights.length > 0 || generation.copy.warnings.length > 0) && (
+                  <details className="listing-ai-insights" open>
+                    <summary>AI 分析说明</summary>
+                    {generation.copy.competitorInsights.map((item) => <p key={item}>• {item}</p>)}
+                    {generation.copy.warnings.map((item) => <p key={item}>• {item}</p>)}
+                  </details>
+                )}
+
+                <div className="listing-ai-policy-note">
+                  <b>官方规则说明</b>
+                  <p>系统使用通用规则做第一层检查；不同站点和类目仍可能有更严格要求，上架前需在 Seller Central 再确认。</p>
+                  <p>7 月 27 日新规还增加 125 字符 Item Highlights，本期先不写入，避免错误映射类目字段。</p>
+                </div>
+
+                <div className="listing-ai-actions">
+                  <button type="button" className="secondary-button" onClick={() => void copy("整套 Listing", listingClipboardText(draft))}>复制全部内容</button>
+                  <button type="button" className="primary-button" disabled={saving || !dirty} onClick={() => void save()}>
+                    {saving ? "保存中…" : dirty ? "保存到 Listing 草稿" : "草稿已保存"} <span>↗</span>
+                  </button>
+                </div>
+              </aside>
+            </div>
+          </main>
+        ) : (
+          <div className="panel empty listing-ai-empty">
+            <span>＋</span><h3>还没有 Listing 草稿</h3><p>点击左侧加号，从公司 SKU 创建一条草稿。</p>
+            <button type="button" className="primary-button" onClick={openCreateDialog}>选择 SKU 创建</button>
           </div>
-        </div>
-      ) : <div className="panel empty"><span>＋</span><h3>还没有 Listing</h3><p>点击左上角加号，从 SKU 创建一条 Listing。</p></div>}
-    </section>
+        )}
+      </section>
+
+      {createDialogOpen && (
+        <ListingCreateDialog
+          products={products}
+          listings={listings}
+          creating={creatingListing}
+          onClose={() => setCreateDialogOpen(false)}
+          onCreate={add}
+        />
+      )}
+    </>
   );
 }

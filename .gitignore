@@ -6,7 +6,8 @@ server-dist
 !.env.example
 *.local
 *.tsbuildinfo
-data/
+/data/
 output/
+.playwright-cli/
 *.zip
 .DS_Store
