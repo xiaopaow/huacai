@@ -10,6 +10,7 @@
     "test": "vitest run",
     "clean": "node -e \"const fs=require('node:fs'); for (const path of ['dist','server-dist']) fs.rmSync(path,{recursive:true,force:true})\"",
     "build": "npm run clean && tsc -p tsconfig.server.json --noEmit && tsc -b && vite build && tsc -p tsconfig.server.build.json",
+    "deploy:check": "node scripts/deploy-preflight.mjs",
     "start": "node server-dist/index.js",
     "start:server": "tsx server/index.ts",
     "preview": "vite preview --host 0.0.0.0"
@@ -20,6 +21,7 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "fflate": "^0.8.3",
+    "helmet": "^8.1.0",
     "lowdb": "^7.0.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

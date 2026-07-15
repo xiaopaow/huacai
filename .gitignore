@@ -9,5 +9,6 @@ server-dist
 /data/
 output/
 .playwright-cli/
+deploy/compose.env
 *.zip
 .DS_Store

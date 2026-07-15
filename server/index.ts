@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
 import cors from "cors";
 import express from "express";
+import helmet from "helmet";
 import { cp, mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { File } from "node:buffer";
@@ -62,6 +63,7 @@ import { canRestoreListingGeneration, visibleListingGenerationsForEmployee } fro
 import { publicListingForEmployee } from "./listingVisibility.js";
 import { buildSystemHealthReport } from "./systemHealth.js";
 import { buildImagePromptPlan } from "./imagePromptPlan.js";
+import { corsOriginAllowed, parseCorsOrigins, parseTrustProxy } from "./securityConfig.js";
 import type {
   ActivityEvent,
   ActivityType,
@@ -84,6 +86,8 @@ type EmployeeRole = Employee["role"];
 
 const app = express();
 const port = Number(process.env.API_PORT ?? 8787);
+const production = process.env.NODE_ENV === "production";
+const corsOrigins = parseCorsOrigins(process.env.CORS_ORIGINS);
 const sessionLifetimeMs = 7 * 24 * 60 * 60 * 1000;
 const loginAttemptWindowMs = 15 * 60 * 1000;
 const maxLoginAttempts = 5;
@@ -99,7 +103,41 @@ let lastImageApiFailure: { code: string; at: string } | null = null;
 await mkdir(uploadDirectory, { recursive: true });
 await mkdir(backupDirectory, { recursive: true });
 
-app.use(cors());
+app.disable("x-powered-by");
+app.set("trust proxy", parseTrustProxy(process.env.TRUST_PROXY));
+app.use(helmet({
+  contentSecurityPolicy: production ? {
+    directives: {
+      defaultSrc: ["'self'"],
+      baseUri: ["'self'"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'", "data:"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+      imgSrc: ["'self'", "data:", "blob:", "https://cos.huotu333.cn"],
+      objectSrc: ["'none'"],
+      scriptSrc: ["'self'"],
+      scriptSrcAttr: ["'none'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      upgradeInsecureRequests: null,
+    },
+  } : false,
+  crossOriginEmbedderPolicy: false,
+  referrerPolicy: { policy: "no-referrer" },
+}));
+app.use((_request, response, next) => {
+  response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+  next();
+});
+if (!production) {
+  app.use(cors());
+} else if (corsOrigins.length) {
+  app.use(cors({
+    origin(origin, callback) {
+      callback(null, corsOriginAllowed(origin, corsOrigins));
+    },
+  }));
+}
 app.use(express.json({ limit: "2mb" }));
 
 function publicEmployee(employee: Employee) {

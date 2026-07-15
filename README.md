@@ -58,6 +58,8 @@ npm run build
 
 ## Docker 部署
 
+完整的生产服务器、HTTPS、备份、更新与回滚步骤见 [生产部署手册](docs/deployment.md)。
+
 1. 复制并填写环境变量：
 
 ```bash
@@ -73,23 +75,35 @@ INITIAL_EMPLOYEE_PASSWORD=请设置强密码
 
 不要沿用示例或旧版本默认密码。首次进入系统后，管理员应在“系统设置 → 上线前自检”确认“账号安全”不再提示默认初始密码，并让所有员工完成首次改密。
 
-2. 构建并启动：
+2. 准备端口绑定并执行上线前检查：
 
 ```bash
-docker compose up -d --build
+cp deploy/compose.env.example deploy/compose.env
+mkdir -p data/uploads data/backups
+sudo chown -R 1000:1000 data
+npm ci
+npm run deploy:check
 ```
 
-3. 打开：
+默认仅监听 `127.0.0.1:8787`，适合由 Caddy/Nginx 提供 HTTPS。可信局域网直接访问时，将 `deploy/compose.env` 的 `HUACAI_BIND_ADDRESS` 改成 `0.0.0.0`。
+
+3. 构建并启动：
+
+```bash
+docker compose --env-file deploy/compose.env up -d --build
+```
+
+4. 打开：
 
 ```text
 http://服务器IP:8787
 ```
 
-4. 查看运行状态：
+5. 查看运行状态：
 
 ```bash
-docker compose ps
-docker compose logs -f huacai
+docker compose --env-file deploy/compose.env ps
+docker compose --env-file deploy/compose.env logs -f huacai
 ```
 
 业务数据和图片保存在宿主机 `./data`，重新构建容器不会丢失。
