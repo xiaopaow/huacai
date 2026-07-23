@@ -26,6 +26,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "read-excel-file": "^9.2.0",
+    "sharp": "^0.34.5",
     "undici": "^7.28.0"
   },
   "devDependencies": {

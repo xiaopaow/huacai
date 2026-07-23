@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { canRestoreListingGeneration, visibleListingGenerationsForEmployee } from "./listingHistoryRules.js";
+import {
+  canDeleteListingGeneration,
+  canRestoreListingGeneration,
+  visibleListingGenerationsForEmployee,
+} from "./listingHistoryRules.js";
 import type { ListingGenerationRecord } from "./types.js";
 
 const record = (id: string, generatedById: string): ListingGenerationRecord => ({
@@ -35,6 +39,19 @@ describe("Listing 历史权限", () => {
   it("运营只能查看和恢复自己生成的版本", () => {
     expect(visibleListingGenerationsForEmployee(records, { id: "ops-1", role: "运营" }).map((item) => item.id)).toEqual(["one"]);
     expect(canRestoreListingGeneration(records[1], { id: "ops-1", role: "运营" })).toBe(false);
+  });
+
+  it("管理员可删除任意可见版本，运营只能删除自己的版本", () => {
+    expect(canDeleteListingGeneration(records[1], { id: "admin", role: "管理员" })).toBe(true);
+    expect(canDeleteListingGeneration(records[0], { id: "ops-1", role: "运营" })).toBe(true);
+    expect(canDeleteListingGeneration(records[1], { id: "ops-1", role: "运营" })).toBe(false);
+  });
+
+  it("软删除版本不再展示、恢复或重复删除", () => {
+    const deleted = { ...records[0], deletedAt: "2026-07-17T00:00:00.000Z" };
+    expect(visibleListingGenerationsForEmployee([deleted], { id: "admin", role: "管理员" })).toEqual([]);
+    expect(canRestoreListingGeneration(deleted, { id: "admin", role: "管理员" })).toBe(false);
+    expect(canDeleteListingGeneration(deleted, { id: "admin", role: "管理员" })).toBe(false);
   });
 
   it("设计和审核即使直接调用规则也只能得到自己的记录", () => {

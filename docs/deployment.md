@@ -27,6 +27,8 @@ sudo chown -R 1000:1000 data
 INITIAL_ADMIN_PASSWORD=至少12位且包含字母和数字
 INITIAL_EMPLOYEE_PASSWORD=另一组至少12位且包含字母和数字
 OPENAI_API_KEY=你的中转Key
+# 可选：启用稳定的 Etsy 竞品读取，格式为 keystring:shared_secret
+ETSY_API_KEY=
 ```
 
 同域部署时 `CORS_ORIGINS` 留空。使用一层 Caddy/Nginx 反向代理时设置：

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getListingHistory, restoreListingGeneration } from "../lib/api";
+import { deleteListingGeneration, getListingHistory, restoreListingGeneration } from "../lib/api";
 import type { EmployeeAccount, ListingGenerationRecord } from "../types/domain";
 
 function formatDate(value: string) {
@@ -13,6 +13,12 @@ function formatDate(value: string) {
 
 function recordCopy(record: ListingGenerationRecord) {
   return record.savedCopy ?? record;
+}
+
+function competitorLabel(record: ListingGenerationRecord) {
+  if (record.generationMode === "product_facts") return "SKU 商品资料";
+  const id = record.competitorExternalId || record.competitorAsin;
+  return record.competitorSource === "etsy" ? `Etsy Listing ID ${id}` : `Amazon ASIN ${id || "历史记录"}`;
 }
 
 function clipboardText(record: ListingGenerationRecord) {
@@ -43,6 +49,7 @@ export default function ListingHistoryPage({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [restoringId, setRestoringId] = useState("");
+  const [deletingId, setDeletingId] = useState("");
   const [selected, setSelected] = useState<ListingGenerationRecord | null>(null);
 
   const load = useCallback(async () => {
@@ -65,7 +72,9 @@ export default function ListingHistoryPage({
       record.sku,
       record.generatedByName,
       record.competitorAsin,
+      record.competitorExternalId,
       record.competitorTitle,
+      record.generationMode === "product_facts" ? "SKU 商品资料" : "",
       record.title,
       record.model,
     ].filter(Boolean).join(" ").toLowerCase().includes(keyword));
@@ -94,6 +103,21 @@ export default function ListingHistoryPage({
     }
   };
 
+  const remove = async (record: ListingGenerationRecord) => {
+    if (!window.confirm(`确认删除 ${record.sku} 的 V${record.version} 历史记录？\n\n删除后将从历史库隐藏，但不会影响员工统计和审计记录。`)) return;
+    setDeletingId(record.id);
+    try {
+      await deleteListingGeneration(record.id);
+      setRecords((current) => current.filter((item) => item.id !== record.id));
+      setSelected((current) => current?.id === record.id ? null : current);
+      notify(`${record.sku} V${record.version} 已删除`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Listing 历史记录删除失败");
+    } finally {
+      setDeletingId("");
+    }
+  };
+
   return (
     <div className="listing-history-page">
       <section className="panel listing-history-hero">
@@ -104,7 +128,7 @@ export default function ListingHistoryPage({
         </div>
         <label className="template-search">
           <span>⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 SKU、ASIN、标题或创建人" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索 SKU、ASIN、Etsy ID、标题或创建人" />
         </label>
       </section>
 
@@ -128,7 +152,7 @@ export default function ListingHistoryPage({
                 <div className="listing-history-meta">
                   <span>创建人 <b>{record.generatedByName}</b></span>
                   <span>{formatDate(record.generatedAt)}</span>
-                  <span>竞品 {record.competitorAsin}</span>
+                  <span>竞品 {competitorLabel(record)}</span>
                   <span>{record.model}</span>
                 </div>
                 <div className={`listing-history-check ${errors ? "failed" : "passed"}`}>
@@ -136,6 +160,9 @@ export default function ListingHistoryPage({
                 </div>
                 <p>{copyData.bulletPoints[0] || copyData.description || "暂无内容"}</p>
                 <div className="listing-history-actions">
+                  <button type="button" className="danger" disabled={deletingId === record.id} onClick={() => void remove(record)}>
+                    {deletingId === record.id ? "删除中…" : "删除记录"}
+                  </button>
                   <button type="button" onClick={() => setSelected(record)}>查看全文</button>
                   <button type="button" onClick={() => void copy(record)}>复制全部</button>
                   <button type="button" className="dark" disabled={restoringId === record.id} onClick={() => void restore(record)}>
@@ -156,12 +183,15 @@ export default function ListingHistoryPage({
             <button className="history-preview-close" type="button" onClick={() => setSelected(null)}>×</button>
             <span className="eyebrow">{selected.sku} · VERSION {selected.version}</span>
             <h3>{recordCopy(selected).title}</h3>
-            <small>{selected.generatedByName} · {formatDate(selected.generatedAt)} · {selected.competitorAsin}</small>
+            <small>{selected.generatedByName} · {formatDate(selected.generatedAt)} · {competitorLabel(selected)}</small>
             <h4>五点卖点</h4>
             <ol>{recordCopy(selected).bulletPoints.map((item, index) => <li key={index}>{item}</li>)}</ol>
             <h4>商品描述</h4><p>{recordCopy(selected).description}</p>
             <h4>Search Terms</h4><p>{recordCopy(selected).searchTerms}</p>
             <div className="listing-history-actions">
+              <button type="button" className="danger" disabled={deletingId === selected.id} onClick={() => void remove(selected)}>
+                {deletingId === selected.id ? "删除中…" : "删除记录"}
+              </button>
               <button type="button" onClick={() => void copy(selected)}>复制全部</button>
               <button type="button" className="dark" onClick={() => void restore(selected)}>恢复到草稿</button>
             </div>

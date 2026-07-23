@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
+import sharp from "sharp";
 import { cp, mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { File } from "node:buffer";
@@ -36,11 +37,13 @@ import { canDeleteLocalListing, findListingConflict } from "./listingRules.js";
 import {
   buildListingGenerationMessages,
   extractCompetitorSnapshot,
+  extractEtsyApiSnapshot,
+  extractEtsyCompetitorSnapshot,
   normalizeGeneratedListingCopy,
-  parseAmazonProductUrl,
+  parseCompetitorProductUrl,
   parseListingModelJson,
   validateGeneratedListingCopy,
-  type AmazonCompetitorReference,
+  type CompetitorReference,
   type CompetitorSnapshot,
 } from "./listingGeneration.js";
 import { getDemoDataStatus, removeDemoData } from "./demoData.js";
@@ -59,7 +62,11 @@ import {
 import { visibleProductsForEmployee, visibleTasksForEmployee } from "./taskVisibility.js";
 import { canAccessImageJob, canCreateImageGenerationJob, hasInvalidOwnedReferenceAsset } from "./imageJobRules.js";
 import { publicHealthResponse } from "./publicHealth.js";
-import { canRestoreListingGeneration, visibleListingGenerationsForEmployee } from "./listingHistoryRules.js";
+import {
+  canDeleteListingGeneration,
+  canRestoreListingGeneration,
+  visibleListingGenerationsForEmployee,
+} from "./listingHistoryRules.js";
 import { publicListingForEmployee } from "./listingVisibility.js";
 import { buildSystemHealthReport } from "./systemHealth.js";
 import { buildImagePromptPlan } from "./imagePromptPlan.js";
@@ -95,12 +102,14 @@ const loginAttempts = new Map<string, { count: number; firstAttemptAt: number; b
 const internalWorkerToken = randomBytes(32).toString("hex");
 const databaseFile = join(process.cwd(), "data", "huacai-db.json");
 const uploadDirectory = join(process.cwd(), "data", "uploads");
+const thumbnailDirectory = join(process.cwd(), "data", "thumbnails");
 const backupDirectory = join(process.cwd(), "data", "backups");
 const backupRetention = normalizedBackupRetention(process.env.BACKUP_RETENTION_COUNT);
 const outboundProxy = process.env.OUTBOUND_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
 const openAiDispatcher = outboundProxy ? new ProxyAgent(outboundProxy) : undefined;
 let lastImageApiFailure: { code: string; at: string } | null = null;
 await mkdir(uploadDirectory, { recursive: true });
+await mkdir(thumbnailDirectory, { recursive: true });
 await mkdir(backupDirectory, { recursive: true });
 
 app.disable("x-powered-by");
@@ -302,6 +311,8 @@ async function restoreDatabaseBackup(name: string) {
       await rm(uploadRoot, { recursive: true, force: true });
       await mkdir(uploadRoot, { recursive: true });
       await cp(assetSnapshot, uploadDirectory, { recursive: true, force: true });
+      await rm(thumbnailDirectory, { recursive: true, force: true });
+      await mkdir(thumbnailDirectory, { recursive: true });
       assetsRestored = true;
     }
   } catch {
@@ -1157,10 +1168,65 @@ app.get("/api/assets/images/:id", async (request: AuthenticatedRequest, response
   try {
     const bytes = await readFile(join(uploadDirectory, id));
     const extension = id.split(".").pop();
-    response.type(extension === "jpg" ? "image/jpeg" : `image/${extension}`).send(bytes);
+    response
+      .set("Cache-Control", "private, max-age=31536000, immutable")
+      .set("Vary", "Authorization")
+      .type(extension === "jpg" ? "image/jpeg" : `image/${extension}`)
+      .send(bytes);
   } catch (error) {
     const missing = error instanceof Error && "code" in error && error.code === "ENOENT";
     response.status(missing ? 404 : 500).json({ error: missing ? "图片不存在" : "图片读取失败" });
+  }
+});
+
+app.get("/api/assets/images/:id/thumbnail", async (request: AuthenticatedRequest, response) => {
+  const id = String(request.params.id);
+  if (!/^[a-f0-9-]+\.(jpg|png|webp)$/.test(id)) {
+    response.status(400).json({ error: "图片编号无效" });
+    return;
+  }
+  const uploaded = db.data.uploadedAssets.find((asset) => asset.id === id);
+  const generated = db.data.generatedAssets.find((asset) => asset.id === id);
+  if (!uploaded && !generated) {
+    response.status(404).json({ error: "素材记录不存在" });
+    return;
+  }
+  const allowed = uploaded
+    ? canViewUploadedAsset(uploaded, db.data.tasks, request.employee!)
+    : generated
+      ? canViewGeneratedAsset(generated, db.data.tasks, request.employee!)
+      : false;
+  if (!allowed) {
+    response.status(403).json({ error: "没有权限查看该素材" });
+    return;
+  }
+
+  const thumbnailPath = join(thumbnailDirectory, `${id}.webp`);
+  try {
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(thumbnailPath);
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      bytes = await sharp(join(uploadDirectory, id))
+        .rotate()
+        .resize({ width: 480, height: 480, fit: "inside", withoutEnlargement: true })
+        .webp({ quality: 76, effort: 4 })
+        .toBuffer();
+      try {
+        await writeFile(thumbnailPath, bytes, { flag: "wx" });
+      } catch (writeError) {
+        if (!(writeError instanceof Error && "code" in writeError && writeError.code === "EEXIST")) throw writeError;
+      }
+    }
+    response
+      .set("Cache-Control", "private, max-age=31536000, immutable")
+      .set("Vary", "Authorization")
+      .type("image/webp")
+      .send(bytes);
+  } catch (error) {
+    const missing = error instanceof Error && "code" in error && error.code === "ENOENT";
+    response.status(missing ? 404 : 500).json({ error: missing ? "图片不存在" : "缩略图生成失败" });
   }
 });
 
@@ -1188,6 +1254,11 @@ app.delete("/api/assets/images/:id", async (request: AuthenticatedRequest, respo
   }
   try {
     await unlink(join(uploadDirectory, id));
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+  }
+  try {
+    await unlink(join(thumbnailDirectory, `${id}.webp`));
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
   }
@@ -1251,39 +1322,96 @@ function imageRequestHeaders(apiKey: string, json = true) {
   return headers;
 }
 
-function competitorRequestHeaders(reference: AmazonCompetitorReference) {
+function competitorRequestHeaders(reference: CompetitorReference) {
   return {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
+    // Etsy exposes a small public Open Graph document to link-preview crawlers even
+    // when the full browser page is protected by its human-verification layer.
+    "User-Agent": reference.source === "etsy"
+      ? "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)"
+      : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
     Accept: "text/html,application/xhtml+xml",
     "Accept-Language": reference.marketplace === "日本站" ? "ja-JP,ja;q=0.9,en;q=0.7" : reference.marketplace === "德国站" ? "de-DE,de;q=0.9,en;q=0.7" : "en-US,en;q=0.9",
   };
 }
 
-async function fetchCompetitorSnapshot(reference: AmazonCompetitorReference) {
+async function fetchCompetitorSnapshot(reference: CompetitorReference) {
+  const etsyApiKey = process.env.ETSY_API_KEY?.trim();
+  if (reference.source === "etsy" && etsyApiKey) {
+    try {
+      const apiUrl = `https://openapi.etsy.com/v3/application/listings/${reference.externalId}?includes=Shop`;
+      const upstream = await openAiFetch(apiUrl, {
+        method: "GET",
+        headers: { Accept: "application/json", "x-api-key": etsyApiKey },
+        dispatcher: openAiDispatcher,
+        signal: AbortSignal.timeout(20_000),
+      });
+      const body = await upstream.json().catch(() => ({})) as unknown;
+      if (!upstream.ok) {
+        const error = upstream.status === 401 || upstream.status === 403
+          ? "Etsy API 授权失败，请管理员检查 ETSY_API_KEY"
+          : upstream.status === 404
+            ? "该 Etsy Listing 不存在、已下架或不是公开商品"
+            : `Etsy API 暂时不可用（HTTP ${upstream.status}），请稍后重试`;
+        return { snapshot: undefined, status: "unavailable" as const, error };
+      }
+      const snapshot = extractEtsyApiSnapshot(body);
+      if (!snapshot.title && !snapshot.description) {
+        return { snapshot: undefined, status: "blocked" as const, error: "Etsy API 未返回可用的商品标题或描述" };
+      }
+      return { snapshot, status: "fetched" as const };
+    } catch (error) {
+      const timedOut = error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
+      return {
+        snapshot: undefined,
+        status: "unavailable" as const,
+        error: timedOut ? "Etsy API 读取超时，请稍后重试" : "暂时无法连接 Etsy API，请检查网络或代理配置",
+      };
+    }
+  }
+
   try {
     const upstream = await openAiFetch(reference.canonicalUrl, {
       method: "GET",
       headers: competitorRequestHeaders(reference),
       redirect: "follow",
       dispatcher: openAiDispatcher,
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(20_000),
     });
-    const finalReference = parseAmazonProductUrl(upstream.url);
-    if (finalReference.asin !== reference.asin) {
+    const finalReference = parseCompetitorProductUrl(upstream.url);
+    if (finalReference.source !== reference.source || finalReference.externalId !== reference.externalId) {
       return { snapshot: undefined, status: "unavailable" as const };
     }
     const contentType = upstream.headers.get("content-type") ?? "";
     if (!upstream.ok || !contentType.includes("text/html")) {
-      return { snapshot: undefined, status: "unavailable" as const };
+      return {
+        snapshot: undefined,
+        status: "unavailable" as const,
+        error: reference.source === "etsy"
+          ? `Etsy 公共商品页暂时无法读取（HTTP ${upstream.status}），请稍后重试或更换链接`
+          : `Amazon 商品页读取失败（HTTP ${upstream.status}），请稍后重试`,
+      };
     }
     const html = (await upstream.text()).slice(0, 3_000_000);
-    const snapshot = extractCompetitorSnapshot(html);
+    const snapshot = reference.source === "etsy"
+      ? extractEtsyCompetitorSnapshot(html)
+      : extractCompetitorSnapshot(html);
     if (!snapshot.title && !snapshot.bulletPoints.length && !snapshot.description) {
-      return { snapshot: undefined, status: "blocked" as const };
+      return {
+        snapshot: undefined,
+        status: "blocked" as const,
+        error: reference.source === "etsy"
+          ? "Etsy 返回了人机验证页，公共抓取暂时受限，请稍后重试或更换链接"
+          : "Amazon 返回了人机验证页，请稍后重试",
+      };
     }
     return { snapshot, status: "fetched" as const };
-  } catch {
-    return { snapshot: undefined, status: "unavailable" as const };
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
+    return {
+      snapshot: undefined,
+      status: "unavailable" as const,
+      error: timedOut ? `${reference.sourceLabel} 商品页读取超时，请稍后重试` : `暂时无法连接 ${reference.sourceLabel}，请检查网络或代理配置`,
+    };
   }
 }
 
@@ -1481,9 +1609,19 @@ app.get("/api/ai/status", (request: AuthenticatedRequest, response) => {
   }, request.employee!));
 });
 
+function detailedProductFactCount(value: string) {
+  const basicIdentity = /^(?:商品名称|品牌|商品类型|商品类目|类目|站点|product\s+name|brand|product\s+type|category|marketplace)\s*[:：]/i;
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-*•]\s*/, ""))
+    .filter((line) => line.length >= 4 && !basicIdentity.test(line) && !/[:：]\s*$/.test(line))
+    .length;
+}
+
 app.post("/api/ai/listings/generate", requireRoles("管理员", "运营"), async (request: AuthenticatedRequest, response) => {
   const input = request.body as {
     listingId?: string;
+    generationMode?: "competitor_first" | "product_facts";
     competitorUrl?: string;
     competitorContent?: string;
     productFacts?: string;
@@ -1495,17 +1633,41 @@ app.post("/api/ai/listings/generate", requireRoles("管理员", "运营"), async
     return;
   }
 
-  let competitor: AmazonCompetitorReference;
-  try {
-    competitor = parseAmazonProductUrl(String(input.competitorUrl ?? "").slice(0, 2_000));
-  } catch (error) {
-    response.status(400).json({ error: error instanceof Error ? error.message : "竞品链接无效" });
-    return;
-  }
-
+  const generationMode = input.generationMode === "product_facts" ? "product_facts" : "competitor_first";
   const competitorContent = String(input.competitorContent ?? "").trim().slice(0, 8_000);
   const productFacts = String(input.productFacts ?? "").trim().slice(0, 6_000);
   const instructions = String(input.instructions ?? "").trim().slice(0, 2_000);
+  let competitor: CompetitorReference | undefined;
+  let competitorResult: {
+    snapshot?: CompetitorSnapshot;
+    status: "fetched" | "blocked" | "unavailable";
+    error?: string;
+  } = { status: "unavailable" };
+
+  if (generationMode === "competitor_first") {
+    try {
+      competitor = parseCompetitorProductUrl(String(input.competitorUrl ?? "").slice(0, 2_000));
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : "竞品链接无效" });
+      return;
+    }
+    competitorResult = await fetchCompetitorSnapshot(competitor);
+    if (!competitorResult.snapshot && !competitorContent) {
+      response.status(422).json({
+        code: "COMPETITOR_PAGE_UNAVAILABLE",
+        asin: competitor.asin,
+        error: competitorResult.error || `已识别 ${competitor.sourceLabel} 竞品编号，但暂时无法读取该商品页，请稍后重试`,
+      });
+      return;
+    }
+  } else if (detailedProductFactCount(productFacts) < 3 && productFacts.length < 80) {
+    response.status(400).json({
+      code: "PRODUCT_FACTS_INCOMPLETE",
+      error: "请至少填写 3 条已核实的商品事实，例如材质、尺寸、包装数量、功能、兼容性或使用场景",
+    });
+    return;
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     response.status(503).json({ error: "AI 文案服务尚未配置，请管理员检查 .env.local" });
@@ -1513,16 +1675,8 @@ app.post("/api/ai/listings/generate", requireRoles("管理员", "运营"), async
   }
 
   const product = db.data.products.find((item) => item.sku.trim().toUpperCase() === listing.sku.trim().toUpperCase());
-  const competitorResult = await fetchCompetitorSnapshot(competitor);
-  if (!competitorResult.snapshot && !competitorContent) {
-    response.status(422).json({
-      code: "COMPETITOR_PAGE_UNAVAILABLE",
-      asin: competitor.asin,
-      error: "已识别竞品 ASIN，但 Amazon 暂未允许读取该商品页。请确认链接能正常打开后重试，或更换另一条竞品链接。",
-    });
-    return;
-  }
   const messages = buildListingGenerationMessages({
+    generationMode,
     marketplaceName: listing.marketplaceName,
     productType: listing.productType,
     sku: listing.sku,
@@ -1593,11 +1747,13 @@ app.post("/api/ai/listings/generate", requireRoles("管理员", "运营"), async
       brand: listing.brand || product?.brand || "",
       generatedById: request.employee!.id,
       generatedByName: request.employee!.name,
-      competitorAsin: competitor.asin,
-      competitorUrl: competitor.canonicalUrl,
+      competitorAsin: competitor?.asin,
+      competitorSource: competitor?.source,
+      competitorExternalId: competitor?.externalId,
+      competitorUrl: competitor?.canonicalUrl,
       competitorTitle: competitorResult.snapshot?.title,
       model,
-      generationMode: "competitor_first",
+      generationMode,
       title: copy.title,
       bulletPoints: copy.bulletPoints,
       description: copy.description,
@@ -1613,7 +1769,15 @@ app.post("/api/ai/listings/generate", requireRoles("管理员", "运营"), async
       entityType: "listing",
       entityId: listing.id,
       quantity: 1,
-      metadata: { generationId: generation.id, version, competitorAsin: competitor.asin, model },
+      metadata: {
+        generationId: generation.id,
+        version,
+        generationMode,
+        competitorSource: competitor?.source,
+        competitorExternalId: competitor?.externalId,
+        competitorAsin: competitor?.asin,
+        model,
+      },
       createdAt: generatedAt,
     });
     await db.write();
@@ -1623,16 +1787,21 @@ app.post("/api/ai/listings/generate", requireRoles("管理员", "运营"), async
       copy,
       compliance,
       model,
-      generationMode: "competitor_first",
-      competitor: {
-        asin: competitor.asin,
-        marketplace: competitor.marketplace,
-        canonicalUrl: competitor.canonicalUrl,
-        sourceStatus: competitorResult.status,
-        extractedTitle: competitorResult.snapshot?.title,
-        extractedBrand: competitorResult.snapshot?.brand,
-        manualContentUsed: Boolean(competitorContent),
-      },
+      generationMode,
+      ...(competitor ? {
+        competitor: {
+          source: competitor.source,
+          sourceLabel: competitor.sourceLabel,
+          externalId: competitor.externalId,
+          asin: competitor.asin,
+          marketplace: competitor.marketplace,
+          canonicalUrl: competitor.canonicalUrl,
+          sourceStatus: competitorResult.status,
+          extractedTitle: competitorResult.snapshot?.title,
+          extractedBrand: competitorResult.snapshot?.brand,
+          manualContentUsed: Boolean(competitorContent),
+        },
+      } : {}),
     });
   } catch (error) {
     const message = error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")
@@ -1648,13 +1817,16 @@ app.post("/api/ai/listings/generate", requireRoles("管理员", "运营"), async
 
 app.get("/api/ai/images", requireRoles("管理员", "运营", "设计"), (request: AuthenticatedRequest, response) => {
   const limit = Math.min(50, Math.max(1, Number(request.query.limit ?? 24)));
+  const offset = Math.max(0, Number(request.query.offset ?? 0));
+  const paged = request.query.paged === "1";
   const viewer = request.employee!;
   const visibleAssets = viewer.role === "管理员"
     ? db.data.generatedAssets
     : db.data.generatedAssets.filter((asset) => asset.ownerId === viewer.id);
-  const assets = visibleAssets
+  const sortedAssets = [...visibleAssets]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, limit)
+  const assets = sortedAssets
+    .slice(offset, offset + limit)
     .map((asset) => {
       const owner = db.data.employees.find((employee) => employee.id === asset.ownerId);
       return {
@@ -1663,7 +1835,18 @@ app.get("/api/ai/images", requireRoles("管理员", "运营", "设计"), (reques
         ownerName: publicAssetOwnerName(owner, viewer, asset.ownerName),
       };
     });
-  response.json(assets);
+  if (!paged) {
+    response.json(assets);
+    return;
+  }
+  const nextOffset = offset + assets.length;
+  response.json({
+    items: assets,
+    total: sortedAssets.length,
+    offset,
+    nextOffset,
+    hasMore: nextOffset < sortedAssets.length,
+  });
 });
 
 app.post("/api/ai/images/generate", async (request: AuthenticatedRequest, response) => {
@@ -2422,6 +2605,23 @@ app.get("/api/listing-history", requireRoles("管理员", "运营"), (request: A
   const limit = Math.min(200, Math.max(1, Number(request.query.limit ?? 50)));
   const records = visibleListingGenerationsForEmployee(db.data.listingGenerations, viewer);
   response.json([...records].sort((a, b) => b.generatedAt.localeCompare(a.generatedAt)).slice(0, limit));
+});
+
+app.delete("/api/listing-history/:id", requireRoles("管理员", "运营"), async (request: AuthenticatedRequest, response) => {
+  const record = db.data.listingGenerations.find((item) => item.id === request.params.id);
+  if (!record || record.deletedAt) {
+    response.status(404).json({ error: "Listing 历史版本不存在或已删除" });
+    return;
+  }
+  if (!canDeleteListingGeneration(record, request.employee!)) {
+    response.status(403).json({ error: "只能删除自己生成的 Listing 历史版本" });
+    return;
+  }
+  record.deletedAt = new Date().toISOString();
+  record.deletedById = request.employee!.id;
+  record.deletedByName = request.employee!.name;
+  await db.write();
+  response.json({ ok: true });
 });
 
 app.post("/api/listing-history/:id/restore", requireRoles("管理员", "运营"), async (request: AuthenticatedRequest, response) => {

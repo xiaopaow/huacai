@@ -336,8 +336,11 @@ export interface ListingGenerationResult {
     compliant: boolean;
   };
   model: string;
-  generationMode: "competitor_first";
-  competitor: {
+  generationMode: "competitor_first" | "product_facts";
+  competitor?: {
+    source: "amazon" | "etsy";
+    sourceLabel: "Amazon" | "Etsy";
+    externalId: string;
     asin: string;
     marketplace: string;
     canonicalUrl: string;
@@ -348,7 +351,13 @@ export interface ListingGenerationResult {
   };
 }
 
-export function generateListingCopy(input: { listingId: string; competitorUrl: string }) {
+export function generateListingCopy(input: {
+  listingId: string;
+  generationMode: "competitor_first" | "product_facts";
+  competitorUrl?: string;
+  productFacts?: string;
+  instructions?: string;
+}) {
   return request<ListingGenerationResult>("/ai/listings/generate", {
     method: "POST",
     body: JSON.stringify(input),
@@ -361,6 +370,10 @@ export function getListingHistory(limit = 50) {
 
 export function restoreListingGeneration(id: string) {
   return request<AmazonListing>(`/listing-history/${id}/restore`, { method: "POST" });
+}
+
+export function deleteListingGeneration(id: string) {
+  return request<{ ok: true }>(`/listing-history/${id}`, { method: "DELETE" });
 }
 
 export interface PersonalStatistics {
@@ -617,6 +630,18 @@ export function getGeneratedImages(limit = 24) {
   return request<GeneratedImage[]>(`/ai/images?limit=${limit}`);
 }
 
+export interface GeneratedImagePage {
+  items: GeneratedImage[];
+  total: number;
+  offset: number;
+  nextOffset: number;
+  hasMore: boolean;
+}
+
+export function getGeneratedImagePage(offset = 0, limit = 16) {
+  return request<GeneratedImagePage>(`/ai/images?paged=1&offset=${offset}&limit=${limit}`);
+}
+
 export function getAiStatus() {
   return request<{
     configured: boolean;
@@ -626,10 +651,16 @@ export function getAiStatus() {
   }>("/ai/status");
 }
 
-export async function getAssetObjectUrl(id: string) {
+export async function getAssetObjectUrl(
+  id: string,
+  variant: "original" | "thumbnail" = "original",
+  signal?: AbortSignal,
+) {
   const token = localStorage.getItem(tokenKey);
-  const response = await fetch(`/api/assets/images/${encodeURIComponent(id)}`, {
+  const suffix = variant === "thumbnail" ? "/thumbnail" : "";
+  const response = await fetch(`/api/assets/images/${encodeURIComponent(id)}${suffix}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
+    signal,
   });
   if (response.status === 401) {
     localStorage.removeItem(tokenKey);

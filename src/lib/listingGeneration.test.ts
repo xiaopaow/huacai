@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildListingComplianceReport, extractAmazonAsin, listingClipboardText, listingTitleLimit } from "./listingGeneration";
+import {
+  buildListingComplianceReport,
+  extractAmazonAsin,
+  extractCompetitorReference,
+  listingClipboardText,
+  listingTitleLimit,
+} from "./listingGeneration";
 
 const listing = {
   productType: "WALL_ART",
@@ -19,6 +25,15 @@ describe("listing generation helpers", () => {
   it("extracts an ASIN from a single Amazon product link", () => {
     expect(extractAmazonAsin("https://www.amazon.com/example/dp/B0ABC12345?th=1")).toBe("B0ABC12345");
     expect(extractAmazonAsin("https://example.com/dp/B0ABC12345")).toBe("");
+  });
+
+  it("recognizes an Etsy listing link", () => {
+    expect(extractCompetitorReference("https://www.etsy.com/listing/1803640494/example-product?ref=shop_home_active_1")).toEqual({
+      source: "etsy",
+      sourceLabel: "Etsy",
+      idLabel: "Listing ID",
+      id: "1803640494",
+    });
   });
 
   it("uses the 2026 non-media title limit", () => {

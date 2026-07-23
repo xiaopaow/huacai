@@ -106,11 +106,13 @@ export interface ListingGenerationRecord {
   brand: string;
   generatedById: string;
   generatedByName: string;
-  competitorAsin: string;
-  competitorUrl: string;
+  competitorSource?: "amazon" | "etsy";
+  competitorExternalId?: string;
+  competitorAsin?: string;
+  competitorUrl?: string;
   competitorTitle?: string;
   model: string;
-  generationMode: "competitor_first";
+  generationMode: "competitor_first" | "product_facts";
   title: string;
   bulletPoints: string[];
   description: string;
@@ -126,6 +128,9 @@ export interface ListingGenerationRecord {
     }>;
   };
   generatedAt: string;
+  deletedAt?: string;
+  deletedById?: string;
+  deletedByName?: string;
   adoptedAt?: string;
   adoptedById?: string;
   adoptedByName?: string;

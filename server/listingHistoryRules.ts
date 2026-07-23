@@ -6,11 +6,16 @@ export function visibleListingGenerationsForEmployee(
   records: ListingGenerationRecord[],
   viewer: Viewer,
 ) {
+  const activeRecords = records.filter((record) => !record.deletedAt);
   return viewer.role === "管理员"
-    ? records
-    : records.filter((record) => record.generatedById === viewer.id);
+    ? activeRecords
+    : activeRecords.filter((record) => record.generatedById === viewer.id);
 }
 
 export function canRestoreListingGeneration(record: ListingGenerationRecord, viewer: Viewer) {
-  return viewer.role === "管理员" || record.generatedById === viewer.id;
+  return !record.deletedAt && (viewer.role === "管理员" || record.generatedById === viewer.id);
+}
+
+export function canDeleteListingGeneration(record: ListingGenerationRecord, viewer: Viewer) {
+  return !record.deletedAt && (viewer.role === "管理员" || record.generatedById === viewer.id);
 }

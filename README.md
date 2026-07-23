@@ -117,10 +117,11 @@ OPENAI_API_KEY=
 OPENAI_IMAGE_MODEL=gpt-image-2
 OPENAI_TEXT_API_URL=https://openrouter.ai/api/v1/chat/completions
 OPENAI_TEXT_MODEL=openai/gpt-5.4
+ETSY_API_KEY=
 MONTHLY_IMAGE_QUOTA=500
 ```
 
-Listing 中心支持粘贴单个 Amazon 竞品详情页链接，自动识别 ASIN、读取公开商品信息并生成标题、五点卖点、描述和 Search Terms。Amazon 返回验证码或限制访问时，系统会明确提示更换链接，不会伪装成已经完成竞品分析。
+Listing 中心支持粘贴单个 Amazon 或 Etsy 竞品详情页链接，自动识别 ASIN/Listing ID、读取公开商品信息并生成标题、五点卖点、描述和 Search Terms。Etsy 默认读取公开的链接预览资料，不要求 API Key；如果以后需要更完整、更稳定的字段，可申请 Etsy Open API v3 凭证，并将 `keystring:shared_secret` 填入可选的 `ETSY_API_KEY`。平台返回验证码或限制访问时，系统会明确提示，不会伪装成已经完成竞品分析。
 
 每次 AI Listing 成功生成都会写入独立历史版本，不会被下一次生成覆盖。管理员可以查看全部员工版本；运营只能查看、恢复自己生成的版本。生图历史同样只向普通员工返回本人作品，管理员可查看团队作品。员工工作台显示本人当月成功生图和 Listing 生成量，团队总量及员工明细只在管理员效率后台开放。
 

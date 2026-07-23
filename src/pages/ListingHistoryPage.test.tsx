@@ -1,11 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getListingHistory, restoreListingGeneration } from "../lib/api";
+import { deleteListingGeneration, getListingHistory, restoreListingGeneration } from "../lib/api";
 import type { EmployeeAccount, ListingGenerationRecord } from "../types/domain";
 import ListingHistoryPage from "./ListingHistoryPage";
 
 vi.mock("../lib/api", () => ({
+  deleteListingGeneration: vi.fn(),
   getListingHistory: vi.fn(),
   restoreListingGeneration: vi.fn(),
 }));
@@ -45,6 +46,7 @@ describe("ListingHistoryPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getListingHistory).mockResolvedValue([record]);
+    vi.mocked(deleteListingGeneration).mockResolvedValue({ ok: true });
     vi.mocked(restoreListingGeneration).mockResolvedValue({} as never);
   });
 
@@ -64,5 +66,17 @@ describe("ListingHistoryPage", () => {
     await user.click(screen.getByRole("button", { name: "恢复到草稿" }));
     expect(restoreListingGeneration).toHaveBeenCalledWith(record.id);
     expect(onOpenListing).toHaveBeenCalledWith(record.sku);
+  });
+
+  it("二次确认后删除历史版本并从页面移除", async () => {
+    const user = userEvent.setup();
+    const notify = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ListingHistoryPage currentUser={currentUser} notify={notify} onOpenListing={vi.fn()} />);
+    await screen.findByText(record.title);
+    await user.click(screen.getByRole("button", { name: "删除记录" }));
+    expect(deleteListingGeneration).toHaveBeenCalledWith(record.id);
+    expect(screen.queryByText(record.title)).not.toBeInTheDocument();
+    expect(notify).toHaveBeenCalledWith(`${record.sku} V${record.version} 已删除`);
   });
 });

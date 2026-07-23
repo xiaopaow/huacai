@@ -1,13 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getAssetObjectUrl, getGeneratedImages, type GeneratedImage } from "../lib/api";
+import { getAssetObjectUrl, getGeneratedImagePage, type GeneratedImage } from "../lib/api";
 import type { EmployeeAccount } from "../types/domain";
 import GeneratedHistoryPage from "./GeneratedHistoryPage";
 
 vi.mock("../lib/api", () => ({
   getAssetObjectUrl: vi.fn(),
-  getGeneratedImages: vi.fn(),
+  getGeneratedImagePage: vi.fn(),
 }));
 
 const currentUser: EmployeeAccount = {
@@ -36,7 +36,13 @@ const generatedImage: GeneratedImage = {
 
 describe("GeneratedHistoryPage", () => {
   beforeEach(() => {
-    vi.mocked(getGeneratedImages).mockResolvedValue([generatedImage]);
+    vi.mocked(getGeneratedImagePage).mockResolvedValue({
+      items: [generatedImage],
+      total: 1,
+      offset: 0,
+      nextOffset: 1,
+      hasMore: false,
+    });
     vi.mocked(getAssetObjectUrl).mockResolvedValue("data:image/png;base64,abc");
   });
 
@@ -68,6 +74,6 @@ describe("GeneratedHistoryPage", () => {
     await user.click(screen.getByRole("button", { name: "大图" }));
 
     await waitFor(() => expect(screen.getByRole("heading", { name: "厨房场景图" })).toBeInTheDocument());
-    expect(screen.getByRole("link", { name: /下载原图/ })).toHaveAttribute("download");
+    expect(await screen.findByRole("link", { name: /下载原图/ })).toHaveAttribute("download");
   });
 });

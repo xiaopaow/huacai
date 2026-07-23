@@ -11,13 +11,41 @@ import ListingCreateDialog, { listingMarketplaces, type ListingMarketplaceOption
 import { buildListingCreateInputFromProduct } from "../lib/listingDraft";
 import {
   buildListingComplianceReport,
-  extractAmazonAsin,
+  extractCompetitorReference,
   listingClipboardText,
 } from "../lib/listingGeneration";
 import type { AmazonListing, GenerationTask, Product } from "../types/domain";
 
 function fiveBullets(points: string[]) {
   return Array.from({ length: 5 }, (_, index) => points[index] ?? "");
+}
+
+type ListingSourceMode = "competitor_first" | "product_facts";
+
+function productFactsTemplate(listing: AmazonListing, product?: Product) {
+  return [
+    `商品名称：${product?.name || listing.title || ""}`,
+    `品牌：${listing.brand || product?.brand || ""}`,
+    `商品类型：${listing.productType || product?.category || ""}`,
+    "材质与结构：",
+    "尺寸/重量：",
+    "颜色/款式：",
+    "包装数量及清单：",
+    "核心功能与卖点：",
+    "适用场景/人群：",
+    "兼容型号：",
+    "安装、使用与维护：",
+    "认证/限制（没有请留空）：",
+  ].join("\n");
+}
+
+function detailedProductFactCount(value: string) {
+  const basicIdentity = /^(?:商品名称|品牌|商品类型|商品类目|类目|站点)\s*[:：]/i;
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-*•]\s*/, ""))
+    .filter((line) => line.length >= 4 && !basicIdentity.test(line) && !/[:：]\s*$/.test(line))
+    .length;
 }
 
 async function writeClipboard(value: string) {
@@ -58,6 +86,9 @@ export default function ListingsPage({
   const [draft, setDraft] = useState<AmazonListing | null>(null);
   const [listingsLoaded, setListingsLoaded] = useState(false);
   const [competitorUrl, setCompetitorUrl] = useState("");
+  const [sourceMode, setSourceMode] = useState<ListingSourceMode>("competitor_first");
+  const [productFacts, setProductFacts] = useState("");
+  const [instructions, setInstructions] = useState("");
   const [generation, setGeneration] = useState<ListingGenerationResult | null>(null);
   const [generationError, setGenerationError] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -68,9 +99,13 @@ export default function ListingsPage({
   const focusRequestRef = useRef("");
 
   const choose = (listing: AmazonListing) => {
+    const product = products.find((item) => item.sku.trim().toUpperCase() === listing.sku.trim().toUpperCase());
     setSelectedId(listing.id);
     setDraft(structuredClone(listing));
     setCompetitorUrl(listing.competitorUrl ?? "");
+    setSourceMode("competitor_first");
+    setProductFacts(productFactsTemplate(listing, product));
+    setInstructions("");
     setGeneration(null);
     setGenerationError("");
     setDirty(false);
@@ -180,7 +215,8 @@ export default function ListingsPage({
     setDirty(true);
   };
 
-  const competitorAsin = useMemo(() => extractAmazonAsin(competitorUrl), [competitorUrl]);
+  const competitorReference = useMemo(() => extractCompetitorReference(competitorUrl), [competitorUrl]);
+  const competitorAsin = competitorReference?.id ?? "";
   const compliance = useMemo(
     () => draft ? buildListingComplianceReport(draft, generation?.copy.assumptions ?? []) : null,
     [draft, generation],
@@ -190,33 +226,46 @@ export default function ListingsPage({
   const matchedProduct = draft
     ? products.find((product) => product.sku.trim().toUpperCase() === draft.sku.trim().toUpperCase())
     : undefined;
+  const verifiedFactCount = useMemo(() => detailedProductFactCount(productFacts), [productFacts]);
 
   const generate = async () => {
     if (!draft || generating) return;
-    if (!competitorAsin) {
-      setGenerationError("请粘贴包含 /dp/ASIN 的完整 Amazon 商品链接");
+    if (sourceMode === "competitor_first" && !competitorAsin) {
+      setGenerationError("请粘贴完整的 Amazon 商品链接或 Etsy /listing/数字ID 商品链接");
+      return;
+    }
+    if (sourceMode === "product_facts" && verifiedFactCount < 3 && productFacts.trim().length < 80) {
+      setGenerationError("请至少填写 3 条已核实的商品事实，例如材质、尺寸、包装数量、功能、兼容性或使用场景");
       return;
     }
     setGenerating(true);
     setGenerationError("");
     try {
-      const result = await generateListingCopy({ listingId: draft.id, competitorUrl: competitorUrl.trim() });
+      const result = await generateListingCopy({
+        listingId: draft.id,
+        generationMode: sourceMode,
+        competitorUrl: sourceMode === "competitor_first" ? competitorUrl.trim() : undefined,
+        productFacts: sourceMode === "product_facts" ? productFacts.trim() : undefined,
+        instructions: sourceMode === "product_facts" ? instructions.trim() : undefined,
+      });
       const next: AmazonListing = {
         ...draft,
         title: result.copy.title,
         bulletPoints: fiveBullets(result.copy.bulletPoints),
         description: result.copy.description,
         searchTerms: result.copy.searchTerms,
-        competitorUrl: result.competitor.canonicalUrl,
-        competitorAsin: result.competitor.asin,
+        competitorUrl: result.competitor?.canonicalUrl,
+        competitorAsin: result.competitor?.asin,
         aiGeneratedAt: new Date().toISOString(),
         latestGenerationId: result.generationId,
       };
       setDraft(next);
-      setCompetitorUrl(result.competitor.canonicalUrl);
+      if (result.competitor) setCompetitorUrl(result.competitor.canonicalUrl);
       setGeneration(result);
       setDirty(true);
-      notify(`已读取竞品 ASIN ${result.competitor.asin} 并生成 Listing，请检查后保存`);
+      notify(result.competitor
+        ? `已读取 ${result.competitor.sourceLabel} ${result.competitor.source === "amazon" ? "ASIN" : "Listing ID"} ${result.competitor.externalId} 并生成 Listing，请检查后保存`
+        : "已根据核实商品资料生成 Listing，请检查后保存");
     } catch (error) {
       const message = error instanceof Error ? error.message : "AI Listing 生成失败";
       setGenerationError(message);
@@ -232,8 +281,8 @@ export default function ListingsPage({
     try {
       const result = await updateListing({
         ...draft,
-        competitorUrl: competitorUrl.trim() || undefined,
-        competitorAsin: competitorAsin || draft.competitorAsin,
+        competitorUrl: sourceMode === "competitor_first" ? competitorUrl.trim() : "",
+        competitorAsin: sourceMode === "competitor_first" ? (competitorAsin || draft.competitorAsin) : "",
       });
       setDraft(result);
       setListings((current) => current.map((item) => item.id === result.id ? result : item));
@@ -263,7 +312,7 @@ export default function ListingsPage({
             <div><span className="eyebrow">LISTING DRAFTS</span><h3>Listing 草稿</h3></div>
             <button type="button" aria-label="新建 Listing" onClick={openCreateDialog}>＋</button>
           </div>
-          <p className="listing-side-tip">选择一个公司 SKU，再用竞品链接生成文案。</p>
+          <p className="listing-side-tip">选择公司 SKU，可用竞品链接或已核实商品资料生成文案。</p>
           {listings.map((listing) => (
             <button className={listing.id === selectedId ? "active" : ""} onClick={() => choose(listing)} key={listing.id}>
               <span>
@@ -281,13 +330,13 @@ export default function ListingsPage({
           <main className="panel listing-ai-page">
             <header className="listing-ai-header">
               <div>
-                <span className="eyebrow">AMAZON AI LISTING</span>
+                <span className="eyebrow">AMAZON / ETSY AI LISTING</span>
                 <h2>{draft.sku}</h2>
-                <p>粘贴一个竞品链接，自动提取 ASIN，并生成可编辑的标题、五点、描述与 Search Terms。</p>
+                <p>可读取 Amazon / Etsy 竞品，也可直接根据已核实的公司商品资料生成标题、五点、描述与 Search Terms。</p>
                 <small className="listing-ai-ownership">草稿创建人：{draft.ownerName || "历史账号"} · 最后编辑：{draft.lastEditedByName || draft.ownerName || "暂无"}</small>
               </div>
               <div className="listing-ai-product-tags">
-                <span className="listing-ai-mode-tag">竞品优先</span>
+                <span className="listing-ai-mode-tag">{sourceMode === "competitor_first" ? "竞品优先" : "商品资料"}</span>
                 <span>{draft.marketplaceName}</span>
                 <span>{draft.productType || matchedProduct?.category || "类目待确认"}</span>
                 <span>{draft.brand || matchedProduct?.brand || "品牌待确认"}</span>
@@ -295,46 +344,125 @@ export default function ListingsPage({
             </header>
 
             <section className="listing-ai-source-card">
-              <div className="listing-ai-step-title">
-                <i>01</i>
-                <div><b>输入竞品链接</b><small>竞品决定商品类型和事实；SKU 仅提供目标品牌与保存位置</small></div>
-              </div>
-              <div className="listing-ai-url-row">
-                <label>
-                  <span>Amazon 竞品 URL</span>
-                  <input
-                    value={competitorUrl}
-                    onChange={(event) => {
-                      setCompetitorUrl(event.target.value);
-                      setGenerationError("");
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void generate();
-                      }
-                    }}
-                    placeholder="https://www.amazon.com/dp/B0XXXXXXXX"
-                    aria-label="Amazon 竞品链接"
-                  />
-                </label>
-                <button type="button" className="primary-button listing-ai-generate" disabled={generating || !competitorAsin} onClick={() => void generate()}>
-                  {generating ? "正在读取竞品并生成…" : "AI 生成 Listing"} <span>↗</span>
+              <div className="listing-source-tabs" role="tablist" aria-label="Listing 生成来源">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={sourceMode === "competitor_first"}
+                  className={sourceMode === "competitor_first" ? "active" : ""}
+                  onClick={() => {
+                    setSourceMode("competitor_first");
+                    setGenerationError("");
+                    setGeneration(null);
+                  }}
+                >
+                  竞品链接生成
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={sourceMode === "product_facts"}
+                  className={sourceMode === "product_facts" ? "active" : ""}
+                  onClick={() => {
+                    setSourceMode("product_facts");
+                    if (!productFacts.trim() && draft) setProductFacts(productFactsTemplate(draft, matchedProduct));
+                    setGenerationError("");
+                    setGeneration(null);
+                  }}
+                >
+                  商品资料生成
                 </button>
               </div>
-              <div className={`listing-ai-asin ${competitorAsin ? "detected" : ""}`}>
-                <span>{competitorAsin ? "✓" : "○"}</span>
+              <div className="listing-ai-step-title">
+                <i>01</i>
                 <div>
-                  <b>{competitorAsin ? `已识别 ASIN：${competitorAsin}` : "等待识别 ASIN"}</b>
-                  <small>{competitorAsin ? "生成时会读取该商品页的公开标题、卖点和描述，不保存网页原文。" : "请使用 Amazon 商品详情页完整链接，系统不会把竞品 ASIN 写成你自己的 ASIN。"}</small>
+                  <b>{sourceMode === "competitor_first" ? "输入竞品链接" : "填写已核实商品资料"}</b>
+                  <small>{sourceMode === "competitor_first" ? "竞品决定商品类型和事实；SKU 仅提供目标品牌与保存位置" : "AI 只使用这里的真实资料，缺失信息不会自行编造"}</small>
                 </div>
               </div>
+              {sourceMode === "competitor_first" ? (
+                <>
+                  <div className="listing-ai-url-row">
+                    <label>
+                      <span>Amazon / Etsy 竞品 URL</span>
+                      <input
+                        value={competitorUrl}
+                        onChange={(event) => {
+                          setCompetitorUrl(event.target.value);
+                          setGenerationError("");
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void generate();
+                          }
+                        }}
+                        placeholder="粘贴 Amazon /dp/ASIN 或 Etsy /listing/数字ID 链接"
+                        aria-label="Amazon 或 Etsy 竞品链接"
+                      />
+                    </label>
+                    <button type="button" className="primary-button listing-ai-generate" disabled={generating || !competitorAsin} onClick={() => void generate()}>
+                      {generating ? "正在读取竞品并生成…" : "AI 生成 Listing"} <span>↗</span>
+                    </button>
+                  </div>
+                  <div className={`listing-ai-asin ${competitorReference ? "detected" : ""}`}>
+                    <span>{competitorReference ? "✓" : "○"}</span>
+                    <div>
+                      <b>{competitorReference ? `已识别 ${competitorReference.sourceLabel} ${competitorReference.idLabel}：${competitorReference.id}` : "等待识别竞品链接"}</b>
+                      <small>{competitorReference ? "生成时会读取该商品页的公开标题、卖点和描述，不保存网页原文。" : "支持 Amazon 商品详情页和 Etsy /listing/数字ID 商品详情页。"}</small>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="listing-product-facts">
+                  <label>
+                    <span>已核实商品资料 <em>{verifiedFactCount} 条有效事实</em></span>
+                    <textarea
+                      value={productFacts}
+                      rows={12}
+                      maxLength={6000}
+                      aria-label="已核实商品资料"
+                      onChange={(event) => {
+                        setProductFacts(event.target.value);
+                        setGenerationError("");
+                      }}
+                    />
+                    <small>至少补充 3 条真实事实。没有确认的材质、尺寸、认证、承重或兼容性请留空。</small>
+                  </label>
+                  <label>
+                    <span>目标关键词与运营要求 <em>可选</em></span>
+                    <textarea
+                      value={instructions}
+                      rows={4}
+                      maxLength={2000}
+                      aria-label="目标关键词与运营要求"
+                      placeholder="例如：目标关键词、目标买家、语气要求，以及禁止出现的表达"
+                      onChange={(event) => setInstructions(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="primary-button listing-ai-generate"
+                    disabled={generating || (verifiedFactCount < 3 && productFacts.trim().length < 80)}
+                    onClick={() => void generate()}
+                  >
+                    {generating ? "正在根据商品资料生成…" : "AI 生成 Listing"} <span>↗</span>
+                  </button>
+                </div>
+              )}
               {generationError && <div className="listing-ai-error">{generationError}</div>}
-              {generation?.competitor.extractedTitle && (
+              {generation?.competitor?.extractedTitle && (
                 <div className="listing-ai-source-result">
                   <span>竞品读取成功</span>
                   <b>{generation.competitor.extractedTitle}</b>
-                  <small>{generation.competitor.marketplace} · ASIN {generation.competitor.asin}{generation.competitor.extractedBrand ? ` · 原品牌 ${generation.competitor.extractedBrand}` : ""} · 模型 {generation.model}</small>
+                  <small>{generation.competitor.sourceLabel} · {generation.competitor.source === "amazon" ? "ASIN" : "Listing ID"} {generation.competitor.externalId}{generation.competitor.extractedBrand ? ` · 原品牌 ${generation.competitor.extractedBrand}` : ""} · 模型 {generation.model}</small>
+                </div>
+              )}
+              {generation?.generationMode === "product_facts" && (
+                <div className="listing-ai-source-result facts-ready">
+                  <span>商品资料读取成功</span>
+                  <b>已使用 {verifiedFactCount} 条核实事实生成文案</b>
+                  <small>来源：公司 SKU 商品资料 · 模型 {generation.model}</small>
                 </div>
               )}
             </section>

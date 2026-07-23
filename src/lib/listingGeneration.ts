@@ -30,18 +30,37 @@ export function listingTitleLimit(productType: string) {
   return mediaProductTypes.has(normalized) ? 200 : 75;
 }
 
-export function extractAmazonAsin(value: string) {
+export interface CompetitorUrlReference {
+  source: "amazon" | "etsy";
+  sourceLabel: "Amazon" | "Etsy";
+  idLabel: "ASIN" | "Listing ID";
+  id: string;
+}
+
+export function extractCompetitorReference(value: string): CompetitorUrlReference | null {
   const trimmed = value.trim();
-  if (!trimmed) return "";
+  if (!trimmed) return null;
   try {
     const url = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
     const hostname = url.hostname.toLowerCase().replace(/^www\./, "").replace(/^smile\./, "");
-    if (!/^amazon\.[a-z.]+$/.test(hostname) && !hostname.endsWith(".amazon.com")) return "";
-    const match = url.pathname.match(/\/(?:dp|gp\/product|gp\/aw\/d|product)\/([A-Z0-9]{10})(?:[/?]|$)/i);
-    return (match?.[1] || url.searchParams.get("asin")?.match(/^[A-Z0-9]{10}$/i)?.[0] || "").toUpperCase();
+    if (hostname === "etsy.com" || hostname.endsWith(".etsy.com")) {
+      const id = url.pathname.match(/\/listing\/(\d{6,20})(?:[/?-]|$)/i)?.[1] ?? "";
+      return id ? { source: "etsy", sourceLabel: "Etsy", idLabel: "Listing ID", id } : null;
+    }
+    if (/^amazon\.[a-z.]+$/.test(hostname) || hostname.includes(".amazon.")) {
+      const match = url.pathname.match(/\/(?:dp|gp\/product|gp\/aw\/d|product)\/([A-Z0-9]{10})(?:[/?]|$)/i);
+      const id = (match?.[1] || url.searchParams.get("asin")?.match(/^[A-Z0-9]{10}$/i)?.[0] || "").toUpperCase();
+      return id ? { source: "amazon", sourceLabel: "Amazon", idLabel: "ASIN", id } : null;
+    }
+    return null;
   } catch {
-    return "";
+    return null;
   }
+}
+
+export function extractAmazonAsin(value: string) {
+  const reference = extractCompetitorReference(value);
+  return reference?.source === "amazon" ? reference.id : "";
 }
 
 function repeatedTitleWords(title: string) {
