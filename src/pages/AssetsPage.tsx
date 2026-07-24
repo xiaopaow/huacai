@@ -20,23 +20,26 @@ type Ratio = "1:1" | "16:9" | "3:4";
 type Quality = "low" | "medium" | "high";
 type GenerateCount = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 const generateCountOptions: GenerateCount[] = [1, 2, 3, 4, 5, 6, 7];
+const studioDraftVersion = 2;
 
 function loadStudioDraft(employeeId: string): { prompt: string; ratio: Ratio; quality: Quality; count: GenerateCount } {
   try {
     const saved = JSON.parse(localStorage.getItem(`huacai-studio-draft:${employeeId}`) ?? "{}") as {
+      version?: number;
       prompt?: string;
       ratio?: Ratio;
       quality?: Quality;
       count?: GenerateCount;
     };
+    const legacyDraft = saved.version !== studioDraftVersion;
     return {
       prompt: saved.prompt ?? "",
-      ratio: ["1:1", "16:9", "3:4"].includes(saved.ratio ?? "") ? saved.ratio! : "1:1",
+      ratio: !legacyDraft && ["1:1", "16:9", "3:4"].includes(saved.ratio ?? "") ? saved.ratio! : "1:1",
       quality: ["low", "medium", "high"].includes(saved.quality ?? "") ? saved.quality! : "medium",
-      count: generateCountOptions.includes(saved.count ?? 0 as GenerateCount) ? saved.count! : 3,
+      count: !legacyDraft && generateCountOptions.includes(saved.count ?? 0 as GenerateCount) ? saved.count! : 1,
     };
   } catch {
-    return { prompt: "", ratio: "1:1", quality: "medium", count: 3 };
+    return { prompt: "", ratio: "1:1", quality: "medium", count: 1 };
   }
 }
 
@@ -115,7 +118,7 @@ export default function AssetsPage({
   useEffect(() => {
     localStorage.setItem(
       `huacai-studio-draft:${currentUser.id}`,
-      JSON.stringify({ prompt, ratio, quality, count }),
+      JSON.stringify({ version: studioDraftVersion, prompt, ratio, quality, count }),
     );
   }, [currentUser.id, prompt, ratio, quality, count]);
 
@@ -300,7 +303,7 @@ export default function AssetsPage({
     setPrompt(job.prompt);
     setRatio(job.ratio as Ratio);
     setQuality(job.quality as Quality);
-    setCount(generateCountOptions.includes(job.count ?? 0 as GenerateCount) ? job.count as GenerateCount : 3);
+    setCount(generateCountOptions.includes(job.count ?? 0 as GenerateCount) ? job.count as GenerateCount : 1);
     setError("");
     window.setTimeout(() => {
       studioRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -390,7 +393,7 @@ export default function AssetsPage({
         </div>
 
         <div className="ai-controls">
-          <label><span>画面比例</span><select value={ratio} onChange={(event) => setRatio(event.target.value as Ratio)}><option value="1:1">1:1 方图</option><option value="16:9">16:9 横图</option><option value="3:4">3:4 竖图</option></select></label>
+          <label><span>画面比例</span><select value={ratio} onChange={(event) => setRatio(event.target.value as Ratio)}><option value="1:1">1:1 Amazon 方图（1600 × 1600）</option><option value="16:9">16:9 横图</option><option value="3:4">3:4 竖图</option></select></label>
           <label><span>生成质量</span><select value={quality} onChange={(event) => setQuality(event.target.value as Quality)}><option value="low">快速草图</option><option value="medium">标准出图</option><option value="high">高清成品</option></select></label>
           <label><span>生成数量</span><select value={count} onChange={(event) => setCount(Number(event.target.value) as GenerateCount)}>{generateCountOptions.map((option) => <option value={option} key={option}>{option} 张</option>)}</select></label>
           <button className="ai-generate-button" type="button" disabled={generating} onClick={createImage}>

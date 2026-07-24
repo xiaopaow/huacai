@@ -30,6 +30,11 @@ const currentUser: EmployeeAccount = {
 
 describe("AssetsPage 做同款", () => {
   beforeEach(() => {
+    localStorage.clear();
+    localStorage.setItem(
+      `huacai-studio-draft:${currentUser.id}`,
+      JSON.stringify({ prompt: "", ratio: "3:4", quality: "medium", count: 3 }),
+    );
     vi.mocked(getGeneratedImages).mockResolvedValue([]);
     vi.mocked(getImageJobs).mockResolvedValue([]);
     vi.mocked(getAssetObjectUrl).mockResolvedValue("");
@@ -42,7 +47,7 @@ describe("AssetsPage 做同款", () => {
       prompt: "商品摄影提示词",
       ratio: "1:1",
       quality: "medium",
-      count: 3,
+      count: 1,
       referenceAssetIds: [],
       attempts: 0,
       createdAt: "2026-07-02T00:00:00.000Z",
@@ -101,6 +106,8 @@ describe("AssetsPage 做同款", () => {
     const prompt = screen.getByRole("textbox", { name: "图片生成提示词" });
     await waitFor(() => expect(prompt).toHaveFocus());
     expect(prompt).not.toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "画面比例" })).toHaveValue("1:1");
+    expect(screen.getByRole("combobox", { name: "生成数量" })).toHaveValue("1");
     expect(screen.getByRole("heading", { name: "从灵感模板开始创作" })).toBeInTheDocument();
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("即可一键生成"));
 
@@ -108,7 +115,7 @@ describe("AssetsPage 做同款", () => {
     await waitFor(() => expect(createImageJob).toHaveBeenCalledTimes(1));
     expect(createImageJob).toHaveBeenCalledWith(expect.objectContaining({
       prompt: expect.any(String),
-      count: 3,
+      count: 1,
       templateId: expect.any(String),
       templateTitle: expect.any(String),
     }));

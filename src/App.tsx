@@ -403,10 +403,11 @@ function App() {
     localStorage.setItem(
       `huacai-studio-draft:${currentUser.id}`,
       JSON.stringify({
+        version: 2,
         prompt: image.prompt,
         ratio: image.ratio,
         quality: image.quality,
-        count: 3,
+        count: 1,
       }),
     );
     notify("已把历史作品提示词载入素材库，可以继续修改后生成");

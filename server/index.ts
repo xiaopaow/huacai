@@ -1277,6 +1277,11 @@ const imageSizes: Record<ImageRatio, string> = {
   "16:9": "1536x1024",
   "3:4": "1024x1536",
 };
+const imageDeliverySizes: Record<ImageRatio, string> = {
+  "1:1": "1600x1600",
+  "16:9": "1536x1024",
+  "3:4": "1024x1536",
+};
 const imageCountOptions: ImageCount[] = [1, 2, 3, 4, 5, 6, 7];
 
 const defaultOpenRouterImageApiUrl = "https://openrouter.ai/api/v1/images";
@@ -1488,6 +1493,21 @@ async function collectImageBase64FromResponse(items: Array<{ b64_json?: string; 
   return images;
 }
 
+async function prepareGeneratedImageForDelivery(base64: string, ratio: ImageRatio) {
+  if (ratio !== "1:1") return base64;
+  const output = await sharp(Buffer.from(base64, "base64"))
+    .rotate()
+    .resize(1600, 1600, {
+      fit: "contain",
+      position: "centre",
+      background: { r: 255, g: 255, b: 255, alpha: 1 },
+    })
+    .flatten({ background: { r: 255, g: 255, b: 255 } })
+    .png({ compressionLevel: 9 })
+    .toBuffer();
+  return output.toString("base64");
+}
+
 async function requestImageBatch(input: {
   apiKey: string;
   imageApiUrl: string;
@@ -1593,8 +1613,9 @@ async function generateImageBase64s(input: {
     const batch = await requestImageBatch({ ...input, prompt: item.prompt, count: 1 });
     const base64 = batch[0];
     if (!base64) break;
-    images.push({ base64, label: item.label });
-    await input.onImage?.({ base64, label: item.label, index: startIndex + offset });
+    const deliveryBase64 = await prepareGeneratedImageForDelivery(base64, input.ratio);
+    images.push({ base64: deliveryBase64, label: item.label });
+    await input.onImage?.({ base64: deliveryBase64, label: item.label, index: startIndex + offset });
   }
   return images;
 }
@@ -1973,7 +1994,7 @@ app.post("/api/ai/images/generate", async (request: AuthenticatedRequest, respon
           ratio,
           quality,
           model,
-          size: imageSizes[ratio],
+          size: imageDeliverySizes[ratio],
           templateId: input.templateId,
           templateTitle: input.templateTitle,
           referenceCount: referenceAssetIds.length,
@@ -2321,7 +2342,7 @@ app.post("/api/ai/jobs", async (request: AuthenticatedRequest, response) => {
   const prompt = input.prompt?.trim() ?? "";
   const ratio = input.ratio ?? "1:1";
   const quality = input.quality ?? "medium";
-  const count = normalizeImageCount(input.count, 3);
+  const count = normalizeImageCount(input.count, 1);
   const referenceAssetIds = [...new Set(input.referenceAssetIds ?? [])].slice(0, 4);
   if (!prompt || prompt.length > 4000) {
     response.status(400).json({ error: "请输入 1–4000 字的图片提示词" });
